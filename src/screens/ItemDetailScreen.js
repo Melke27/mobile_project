@@ -1,8 +1,15 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  ActivityIndicator, Alert, Image, Pressable,
-  SafeAreaView, ScrollView, Share, StyleSheet,
-  Text, TextInput, View,
+  ActivityIndicator,
+  Alert,
+  Image,
+  Pressable,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from 'react-native';
 import AppIcon from '../components/AppIcon';
 import { useAuth } from '../context/AuthContext';
@@ -10,576 +17,488 @@ import { useItems } from '../context/ItemsContext';
 import { itemService } from '../services/itemService';
 import { generateItemImageUrl, resolveItemImageUrl } from '../utils/imageFallback';
 
-// ─── Constants ────────────────────────────────────────────────────
 const C = {
   blue: '#1a6edb',
-  blueSoft: '#eff6ff',
-  blueAlpha: 'rgba(26,110,219,0.12)',
-  white: '#ffffff',
-  bg: '#f2f4f8',
+  bg: '#f5f7fb',
   card: '#ffffff',
-  border: '#e8eaed',
-  borderSoft: '#f0f2f5',
-  textDark: '#111827',
-  textMid: '#6b7280',
-  textLight: '#9ca3af',
-  green: '#16a34a',
-  greenBg: '#e8f5e9',
-  red: '#cc2222',
-  redBg: '#fff0f0',
-  amber: '#b45309',
-  amberBg: '#fff3e0',
-  purpleBg: '#e8edff',
-  purple: '#1a3edb',
+  border: '#e5e7eb',
+  text: '#111827',
+  muted: '#6b7280',
+  red: '#b42318',
 };
 
-const MATCH_LIMIT = 5;
+const normalizeStatus = (status = '') => (status === 'returned' ? 'recovered' : status);
 
-// ─── Helpers ──────────────────────────────────────────────────────
+const statusStyle = (status) => {
+  const key = normalizeStatus(String(status || '').toLowerCase());
+  if (key === 'lost') return { label: 'LOST', bg: '#fff0f0', text: '#cc2222' };
+  if (key === 'found') return { label: 'FOUND', bg: '#e8f5e9', text: '#1b5e20' };
+  if (key === 'recovered') return { label: 'RETURNED', bg: '#eff6ff', text: '#1a6edb' };
+  return { label: 'UNKNOWN', bg: '#f3f4f6', text: C.muted };
+};
+
 const toDisplayTime = (val) => {
-  if (!val) return 'Not available';
+  if (!val) return 'Unknown';
   const d = new Date(val);
-  return isNaN(d.getTime()) ? 'Not available' : d.toLocaleString();
+  return Number.isNaN(d.getTime()) ? 'Unknown' : d.toLocaleString();
 };
 
-const STATUS_MAP = {
-  lost: { label: 'LOST', icon: 'compass-outline', text: C.red, bg: C.redBg, border: '#efb6bb' },
-  found: { label: 'FOUND', icon: 'package-variant-closed', text: C.green, bg: C.greenBg, border: '#badcc0' },
-  recovered: { label: 'RETURNED', icon: 'check-circle-outline', text: C.purple, bg: C.purpleBg, border: '#c7d4fd' },
-  returned: { label: 'RETURNED', icon: 'check-circle-outline', text: C.purple, bg: C.purpleBg, border: '#c7d4fd' },
-  archived: { label: 'ARCHIVED', icon: 'archive-outline', text: C.textMid, bg: '#f3f4f6', border: '#d1d5db' },
-};
-const DEFAULT_STATUS = { label: 'UNKNOWN', icon: 'help-circle-outline', text: C.textMid, bg: C.blueSoft, border: C.border };
-const getStatus = (s) => STATUS_MAP[s] ?? DEFAULT_STATUS;
-
-const TONE_MAP = {
-  primary: { bg: C.blue, border: C.blue, icon: C.white, title: C.white, sub: 'rgba(255,255,255,0.75)' },
-  success: { bg: C.green, border: C.green, icon: C.white, title: C.white, sub: 'rgba(255,255,255,0.75)' },
-  danger: { bg: '#a93f3f', border: '#a93f3f', icon: C.white, title: C.white, sub: '#ffdede' },
-  warning: { bg: C.amber, border: C.amber, icon: C.white, title: C.white, sub: '#ffecc7' },
-  neutral: { bg: C.card, border: C.border, icon: C.blue, title: C.textDark, sub: C.textMid },
-};
-
-// ─── OptionCard ───────────────────────────────────────────────────
-const OptionCard = ({ iconName, title, subtitle, onPress, tone = 'neutral', disabled = false }) => {
-  const t = TONE_MAP[tone] ?? TONE_MAP.neutral;
-  return (
-    <Pressable
-      style={({ pressed }) => [s.optionCard, { backgroundColor: t.bg, borderColor: t.border },
-      pressed && !disabled && { opacity: 0.88 }, disabled && { opacity: 0.5 }]}
-      onPress={onPress} disabled={disabled}
-      android_ripple={{ color: 'rgba(255,255,255,0.2)' }}
-    >
-      <View style={[s.optionIcon, { backgroundColor: 'rgba(255,255,255,0.2)' }]}>
-        <AppIcon name={iconName} size={16} color={t.icon} />
-      </View>
-      <View style={{ flex: 1 }}>
-        <Text style={[s.optionTitle, { color: t.title }]} numberOfLines={1}>{title}</Text>
-        <Text style={[s.optionSub, { color: t.sub }]} numberOfLines={2}>{subtitle}</Text>
-      </View>
-      <AppIcon name="chevron-right" size={16} color={t.icon} />
-    </Pressable>
-  );
-};
-
-// ─── InfoChip ─────────────────────────────────────────────────────
-const InfoChip = ({ icon, label, value }) => (
-  <View style={s.infoChip}>
-    <View style={s.infoChipIcon}>
-      <AppIcon name={icon} size={13} color={C.blue} />
-    </View>
-    <View style={{ flex: 1 }}>
-      <Text style={s.infoChipLabel}>{label}</Text>
-      <Text style={s.infoChipValue} numberOfLines={2}>{value}</Text>
-    </View>
-  </View>
-);
-
-// ─── SectionHeader ────────────────────────────────────────────────
-const SectionHeader = ({ icon, title, sub }) => (
-  <View style={{ marginTop: 18, marginBottom: 10 }}>
-    <View style={s.secTitleRow}>
-      <View style={s.secIconWrap}><AppIcon name={icon} size={15} color={C.blue} /></View>
-      <Text style={s.secTitle}>{title}</Text>
-    </View>
-    {sub ? <Text style={s.secSub}>{sub}</Text> : null}
-  </View>
-);
-
-// ─── Screen ───────────────────────────────────────────────────────
 const ItemDetailScreen = ({ route, navigation }) => {
   const initial = route.params?.item || {};
   const { user } = useAuth();
   const {
-    markRecovered, flagReport, deleteReport, getMatchesFor,
-    requestClaim, reviewClaim, getClaimContact, reviewItemApproval,
-    toggleSavedItem, isItemSaved, recordViewedItem,
+    markRecovered,
+    deleteReport,
+    requestClaim,
+    reviewClaim,
+    getClaimContact,
   } = useItems();
 
   const [item, setItem] = useState(initial);
-  const [matches, setMatches] = useState([]);
   const [loading, setLoading] = useState(!initial?.title);
-  const [matchesLoading, setMatchesLoading] = useState(false);
+  const [busy, setBusy] = useState('');
   const [imgFailed, setImgFailed] = useState(false);
-  const [flagReason, setFlagReason] = useState('Suspicious or spam report');
+
+  const [showClaimForm, setShowClaimForm] = useState(false);
   const [claimAnswers, setClaimAnswers] = useState([]);
   const [claimNote, setClaimNote] = useState('');
-  const [showClaimForm, setShowClaimForm] = useState(false);
-  const [claimLoading, setClaimLoading] = useState(false);
   const [claimContact, setClaimContact] = useState(null);
 
-  useEffect(() => { setImgFailed(false); }, [item?._id]);
-
-  // Load full item if only id passed
   useEffect(() => {
-    if (initial?.title || !initial?._id) return;
+    setImgFailed(false);
+  }, [item?._id]);
+
+  useEffect(() => {
+    if (initial?.title || !initial?._id) {
+      return;
+    }
+
     setLoading(true);
-    itemService.getById(initial._id)
-      .then(d => setItem(d.item || initial))
-      .catch(e => Alert.alert('Error', e?.response?.data?.message || 'Could not load item.'))
+    itemService
+      .getById(initial._id)
+      .then((d) => setItem(d.item || initial))
+      .catch((e) => Alert.alert('Error', e?.response?.data?.message || 'Could not load item details.'))
       .finally(() => setLoading(false));
   }, [initial]);
 
-  // Load matches
-  useEffect(() => {
-    if (!item?._id || !user?._id) { setMatches([]); return; }
-    setMatchesLoading(true);
-    getMatchesFor(item)
-      .then(r => setMatches(Array.isArray(r) ? r : []))
-      .catch(console.error)
-      .finally(() => setMatchesLoading(false));
-  }, [getMatchesFor, item, user?._id]);
-
-  // Record view
-  useEffect(() => {
-    if (item?._id) recordViewedItem(item).catch(console.warn);
-  }, [item, recordViewedItem]);
-
-  // Reset claim state when item changes
   useEffect(() => {
     const count = Array.isArray(item?.secretQuestions) ? item.secretQuestions.length : 0;
     setClaimAnswers(Array.from({ length: count }, () => ''));
-    setClaimNote(''); setClaimContact(null); setShowClaimForm(false);
+    setClaimNote('');
+    setClaimContact(null);
+    setShowClaimForm(false);
   }, [item?._id, item?.secretQuestions]);
 
-  // ── Derived state ──
+  const reloadItem = async () => {
+    if (!item?._id) return;
+    const data = await itemService.getById(item._id);
+    setItem(data?.item || item);
+  };
+
   const reporterId = typeof item?.reportedBy === 'string' ? item.reportedBy : item?.reportedBy?._id;
   const isGuest = !user?._id;
-  const isOwner = !isGuest && reporterId === user?._id;
-  const canManage = !isGuest && (isOwner || user?.role === 'admin');
-  const canChat = !isGuest && Boolean(reporterId) && reporterId !== user?._id;
-  const isRecovered = item?.status === 'recovered' || item?.status === 'returned';
-  const saved = isItemSaved(item?._id);
-  const claimStatus = item?.claim?.status || 'none';
-  const approvalStatus = item?.approvalStatus || 'pending';
-  const claimReqId = typeof item?.claim?.requester === 'string' ? item.claim.requester : item?.claim?.requester?._id;
-  const isClaimRequester = !isGuest && claimReqId === user?._id;
-  const canRequestClaim = !isGuest && !isOwner && item?.status === 'found' &&
-    claimStatus !== 'approved' && claimStatus !== 'pending' &&
-    Array.isArray(item?.secretQuestions) && item.secretQuestions.length > 0;
+  const isOwner = Boolean(user?._id) && reporterId === user?._id;
+  const canManage = Boolean(user?._id) && (isOwner || user?.role === 'admin');
+  const canChat = Boolean(user?._id && reporterId && reporterId !== user?._id);
+  const isRecovered = normalizeStatus(item?.status) === 'recovered';
+
+  const claimStatus = String(item?.claim?.status || 'none').toLowerCase();
+  const claimRequesterId = typeof item?.claim?.requester === 'string'
+    ? item.claim.requester
+    : item?.claim?.requester?._id;
+  const isClaimRequester = Boolean(user?._id) && claimRequesterId === user?._id;
+  const hasQuestions = Array.isArray(item?.secretQuestions) && item.secretQuestions.length > 0;
+
+  const canRequestClaim = !isGuest && !isOwner && item?.status === 'found' && hasQuestions
+    && claimStatus !== 'pending' && claimStatus !== 'approved';
   const canReviewClaim = canManage && claimStatus === 'pending';
-  const statusVis = getStatus(item?.status);
+  const canRevealContact = claimStatus === 'approved' && (isClaimRequester || canManage);
 
-  const imageSource = useMemo(() => ({
-    uri: imgFailed ? generateItemImageUrl(item) : resolveItemImageUrl(item),
-  }), [imgFailed, item]);
+  const status = statusStyle(item?.status);
+  const imageSource = useMemo(
+    () => ({ uri: imgFailed ? generateItemImageUrl(item) : resolveItemImageUrl(item) }),
+    [imgFailed, item]
+  );
 
-  const DETAILS = [
-    { key: 'category', label: 'Category', value: item?.category || 'N/A', icon: 'tag-outline' },
-    { key: 'location', label: 'Location', value: item?.locationText || 'Not provided', icon: 'map-marker-outline' },
-    { key: 'reporter', label: 'Reported by', value: item?.reportedBy?.name || 'Unknown', icon: 'account-outline' },
-    { key: 'reportedAt', label: 'Reported at', value: toDisplayTime(item?.createdAt), icon: 'clock-outline' },
-  ];
+  const onMarkRecovered = async () => {
+    if (!canManage || !item?._id || isRecovered) {
+      return;
+    }
 
-  // ── Navigation helpers ──
-  const goAccount = () => {
-    const nav = navigation.getParent?.() || navigation;
-    nav.navigate?.('Main', { screen: 'Account' }) || navigation.navigate('Account');
-  };
-
-  // ── Actions ──
-  const onRecovered = async () => {
-    if (isGuest) { Alert.alert('Login required'); goAccount(); return; }
+    setBusy('recover');
     try {
-      const d = await markRecovered(item._id);
-      setItem(d.item || { ...item, status: 'recovered' });
-      Alert.alert('Updated', 'Marked as recovered.');
-    } catch (e) { Alert.alert('Error', e?.response?.data?.message || 'Failed.'); }
-  };
-
-  const onFlag = async () => {
-    if (isGuest) { Alert.alert('Login required'); goAccount(); return; }
-    try {
-      await flagReport(item._id, flagReason.trim() || 'Suspicious or spam report');
-      Alert.alert('Flagged', 'Sent for admin review.');
-    } catch (e) { Alert.alert('Error', e?.response?.data?.message || 'Failed.'); }
+      await markRecovered(item._id);
+      await reloadItem();
+      Alert.alert('Done', 'Report marked as recovered.');
+    } catch (e) {
+      Alert.alert('Error', e?.response?.data?.message || 'Could not update report.');
+    } finally {
+      setBusy('');
+    }
   };
 
   const onDelete = () => {
-    Alert.alert('Delete Report', 'This will permanently delete this report.', [
+    if (!canManage || !item?._id) {
+      return;
+    }
+
+    Alert.alert('Delete Report', 'This will permanently delete the report.', [
       { text: 'Cancel', style: 'cancel' },
       {
-        text: 'Delete', style: 'destructive', onPress: async () => {
-          try { await deleteReport(item._id); navigation.goBack(); }
-          catch (e) { Alert.alert('Error', e?.response?.data?.message || 'Failed.'); }
-        }
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          setBusy('delete');
+          try {
+            await deleteReport(item._id);
+            navigation.goBack();
+          } catch (e) {
+            Alert.alert('Error', e?.response?.data?.message || 'Could not delete report.');
+          } finally {
+            setBusy('');
+          }
+        },
       },
     ]);
   };
 
-  const onToggleSaved = async () => {
-    try {
-      const now = await toggleSavedItem(item);
-      Alert.alert(now ? 'Saved' : 'Removed', now ? 'Bookmarked.' : 'Removed from saved.');
-    } catch (e) { Alert.alert('Error', e?.message); }
+  const onEdit = () => {
+    if (!isOwner || !item?._id) {
+      return;
+    }
+    navigation.navigate('Post', { mode: 'edit', item });
   };
 
-  const onShare = () => Share.share({
-    message: `${item.title || 'Lost/Found'}\n${item.description || ''}\nLocation: ${item.locationText || 'N/A'}`,
-  }).catch(console.warn);
+  const onOpenChat = () => {
+    if (!canChat) {
+      return;
+    }
+    navigation.navigate('ChatConversation', {
+      item: { _id: item._id, title: item.title, status: item.status },
+      otherUserId: reporterId,
+    });
+  };
 
   const onSubmitClaim = async () => {
-    if (claimAnswers.some(a => !String(a || '').trim())) {
-      Alert.alert('Claim', 'Answer all questions.'); return;
+    const answers = claimAnswers.map((entry) => String(entry || '').trim());
+    if (answers.some((entry) => !entry)) {
+      Alert.alert('Claim', 'Please answer all secret questions.');
+      return;
     }
-    setClaimLoading(true);
+
+    setBusy('claim-submit');
     try {
-      await requestClaim(item._id, { answers: claimAnswers.map(a => String(a).trim()), note: claimNote.trim() });
-      const d = await itemService.getById(item._id);
-      setItem(d.item || item);
-      Alert.alert('Submitted', 'Claim sent to finder.');
+      await requestClaim(item._id, { answers, note: claimNote.trim() });
+      await reloadItem();
+      Alert.alert('Submitted', 'Claim submitted. Finder/admin will review it.');
       setShowClaimForm(false);
-    } catch (e) { Alert.alert('Failed', e?.response?.data?.message || 'Try again.'); }
-    finally { setClaimLoading(false); }
+    } catch (e) {
+      Alert.alert('Error', e?.response?.data?.message || 'Could not submit claim.');
+    } finally {
+      setBusy('');
+    }
   };
 
   const onReviewClaim = async (action) => {
-    setClaimLoading(true);
+    setBusy(`claim-${action}`);
     try {
-      await reviewClaim(item._id, { action });
-      const d = await itemService.getById(item._id);
-      setItem(d.item || item);
+      await reviewClaim(item._id, {
+        action,
+        note: action === 'approve' ? 'Approved after review.' : 'Declined after review.',
+      });
+      await reloadItem();
       Alert.alert('Done', action === 'approve' ? 'Claim approved.' : 'Claim declined.');
-    } catch (e) { Alert.alert('Failed', e?.response?.data?.message); }
-    finally { setClaimLoading(false); }
-  };
-
-  const onReviewApproval = async (action) => {
-    setClaimLoading(true);
-    try {
-      await reviewItemApproval(item._id, action, action === 'approve' ? 'Approved by admin' : 'Rejected by admin');
-      const d = await itemService.getById(item._id);
-      setItem(d.item || item);
-      Alert.alert('Done', action === 'approve' ? 'Report approved.' : 'Report rejected.');
     } catch (e) {
-      Alert.alert('Failed', e?.response?.data?.message || 'Could not update approval status.');
+      Alert.alert('Error', e?.response?.data?.message || 'Could not review claim.');
     } finally {
-      setClaimLoading(false);
+      setBusy('');
     }
   };
 
   const onRevealContact = async () => {
-    setClaimLoading(true);
+    setBusy('contact');
     try {
-      const d = await getClaimContact(item._id);
-      setClaimContact(d?.contact || null);
-    } catch (e) { Alert.alert('Error', e?.response?.data?.message); }
-    finally { setClaimLoading(false); }
+      const data = await getClaimContact(item._id);
+      setClaimContact(data?.contact || null);
+    } catch (e) {
+      Alert.alert('Error', e?.response?.data?.message || 'Could not reveal contact.');
+    } finally {
+      setBusy('');
+    }
   };
 
-  // ── Actions list ──
-  const actions = [
-    isGuest && { key: 'login', iconName: 'login', title: 'Sign In For Full Access', subtitle: 'Unlock chat, claims and moderation.', onPress: goAccount, tone: 'primary' },
-    !isGuest && canChat && {
-      key: 'chat',
-      iconName: 'chat-processing-outline',
-      title: 'Message Reporter',
-      subtitle: 'Coordinate a safe handoff directly.',
-      onPress: () => navigation.navigate('Main', { screen: 'Chat', params: { item, otherUserId: reporterId } }),
-      tone: 'success'
-    },
-    canRequestClaim && { key: 'claim', iconName: 'account-check-outline', title: 'This is Mine!', subtitle: 'Answer secret questions to claim this item.', onPress: () => setShowClaimForm(p => !p), tone: 'success' },
-    !isGuest && { key: 'recover', iconName: 'check-circle-outline', title: isRecovered ? 'Already Recovered' : 'Mark As Recovered', subtitle: isRecovered ? 'This report is closed.' : 'Close the report once item is returned.', onPress: onRecovered, tone: 'primary', disabled: isRecovered },
-    { key: 'save', iconName: saved ? 'bookmark-remove-outline' : 'bookmark-outline', title: saved ? 'Remove Bookmark' : 'Save Item', subtitle: saved ? 'Tap to unsave this report.' : 'Bookmark for quick access.', onPress: onToggleSaved, tone: 'warning' },
-    { key: 'share', iconName: 'share-variant-outline', title: 'Share Report', subtitle: 'Spread the word so the owner is found faster.', onPress: onShare, tone: 'neutral' },
-  ].filter(Boolean);
-
-  if (loading) return (
-    <SafeAreaView style={s.loaderWrap}>
-      <ActivityIndicator size="large" color={C.blue} />
-    </SafeAreaView>
-  );
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.loaderWrap}>
+        <ActivityIndicator size="large" color={C.blue} />
+      </SafeAreaView>
+    );
+  }
 
   return (
-    <SafeAreaView style={s.root}>
-      <ScrollView contentContainerStyle={s.content} showsVerticalScrollIndicator={false}>
+    <SafeAreaView style={styles.root}>
+      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        <Image source={imageSource} style={styles.image} resizeMode="cover" onError={() => setImgFailed(true)} />
 
-        {/* ── Blue hero header ── */}
-        <View style={s.hero}>
-          <Image source={imageSource} style={s.heroImg} resizeMode="cover"
-            onError={() => setImgFailed(true)} />
-          <View style={s.heroOverlay} />
-
-          {/* Top: back + status + bookmark */}
-          <View style={s.heroTop}>
-            <Pressable style={s.backBtn} onPress={() => navigation.goBack()}>
-              <AppIcon name="arrow-left" size={18} color={C.white} />
-            </Pressable>
-            <View style={[s.statusPill, { backgroundColor: statusVis.bg, borderColor: statusVis.border }]}>
-              <AppIcon name={statusVis.icon} size={12} color={statusVis.text} />
-              <Text style={[s.statusTxt, { color: statusVis.text }]}>{statusVis.label}</Text>
+        <View style={styles.card}>
+          <View style={styles.titleRow}>
+            <Text style={styles.title}>{item?.title || 'Item Details'}</Text>
+            <View style={[styles.statusBadge, { backgroundColor: status.bg }]}>
+              <Text style={[styles.statusText, { color: status.text }]}>{status.label}</Text>
             </View>
-            <Pressable style={s.backBtn} onPress={onToggleSaved}>
-              <AppIcon name={saved ? 'bookmark' : 'bookmark-outline'} size={18} color={C.white} />
-            </Pressable>
+          </View>
+
+          <Text style={styles.desc}>{item?.description || 'No description provided.'}</Text>
+
+          <View style={styles.infoRow}>
+            <AppIcon name="tag-outline" size={16} color={C.muted} />
+            <Text style={styles.infoText}>{item?.category || 'Unknown category'}</Text>
+          </View>
+          <View style={styles.infoRow}>
+            <AppIcon name="map-marker-outline" size={16} color={C.muted} />
+            <Text style={styles.infoText}>{item?.locationText || 'Unknown location'}</Text>
+          </View>
+          <View style={styles.infoRow}>
+            <AppIcon name="account-outline" size={16} color={C.muted} />
+            <Text style={styles.infoText}>{item?.reportedBy?.name || 'Unknown reporter'}</Text>
+          </View>
+          <View style={styles.infoRow}>
+            <AppIcon name="clock-outline" size={16} color={C.muted} />
+            <Text style={styles.infoText}>{toDisplayTime(item?.createdAt)}</Text>
           </View>
         </View>
 
-        {/* ── Title block ── */}
-        <View style={s.titleBlock}>
-          <Text style={s.title}>{item.title || 'Item Details'}</Text>
-          <Text style={s.desc}>{item.description || 'No description provided.'}</Text>
-          {approvalStatus !== 'approved' && (
-            <View style={[s.approvalBadge, approvalStatus === 'pending' ? s.approvalPending : s.approvalRejected]}>
-              <Text style={[s.approvalBadgeText, approvalStatus === 'pending' ? s.approvalPendingText : s.approvalRejectedText]}>
-                {approvalStatus === 'pending' ? 'Pending Admin Approval' : 'Rejected By Admin'}
-              </Text>
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>Simple Recovery Workflow</Text>
+          <Text style={styles.stepText}>1. Chat in-app (anonymous)</Text>
+          <Text style={styles.stepText}>2. Ask and answer secret questions</Text>
+          <Text style={styles.stepText}>3. Approve claim</Text>
+          <Text style={styles.stepText}>4. Mark returned</Text>
+
+          {canChat && (
+            <Pressable style={[styles.button, styles.primary]} onPress={onOpenChat}>
+              <Text style={styles.primaryText}>Message User</Text>
+            </Pressable>
+          )}
+
+          {canRequestClaim && (
+            <Pressable
+              style={[styles.button, styles.secondary]}
+              onPress={() => setShowClaimForm((prev) => !prev)}
+            >
+              <Text style={styles.secondaryText}>{showClaimForm ? 'Hide Claim Form' : 'This Is Mine (Claim)'}</Text>
+            </Pressable>
+          )}
+
+          {showClaimForm && canRequestClaim && (
+            <View style={styles.claimFormWrap}>
+              {(item?.secretQuestions || []).map((entry, idx) => (
+                <View key={`${item?._id}-q-${idx}`}>
+                  <Text style={styles.claimQuestion}>{entry?.question || `Question ${idx + 1}`}</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={claimAnswers[idx] || ''}
+                    onChangeText={(value) => {
+                      setClaimAnswers((prev) => prev.map((x, i) => (i === idx ? value : x)));
+                    }}
+                    placeholder="Your answer"
+                    placeholderTextColor="#6b7280"
+                  />
+                </View>
+              ))}
+              <TextInput
+                style={styles.input}
+                value={claimNote}
+                onChangeText={setClaimNote}
+                placeholder="Optional note"
+                placeholderTextColor="#6b7280"
+              />
+              <Pressable
+                style={[styles.button, styles.primary, busy === 'claim-submit' && styles.disabled]}
+                onPress={onSubmitClaim}
+                disabled={busy === 'claim-submit'}
+              >
+                {busy === 'claim-submit'
+                  ? <ActivityIndicator size="small" color="#fff" />
+                  : <Text style={styles.primaryText}>Submit Claim</Text>}
+              </Pressable>
             </View>
+          )}
+
+          <View style={styles.claimStatusWrap}>
+            <Text style={styles.claimStatusText}>Claim Status: {claimStatus.toUpperCase()}</Text>
+          </View>
+
+          {canReviewClaim && (
+            <View style={styles.actionsRow}>
+              <Pressable
+                style={[styles.button, styles.primary, styles.halfButton, busy === 'claim-approve' && styles.disabled]}
+                onPress={() => onReviewClaim('approve')}
+                disabled={busy === 'claim-approve'}
+              >
+                {busy === 'claim-approve'
+                  ? <ActivityIndicator size="small" color="#fff" />
+                  : <Text style={styles.primaryText}>Approve Claim</Text>}
+              </Pressable>
+              <Pressable
+                style={[styles.button, styles.warning, styles.halfButton, busy === 'claim-decline' && styles.disabled]}
+                onPress={() => onReviewClaim('decline')}
+                disabled={busy === 'claim-decline'}
+              >
+                {busy === 'claim-decline'
+                  ? <ActivityIndicator size="small" color="#9a3412" />
+                  : <Text style={styles.warningText}>Decline Claim</Text>}
+              </Pressable>
+            </View>
+          )}
+
+          {canRevealContact && (
+            <>
+              <Pressable
+                style={[styles.button, styles.secondary, busy === 'contact' && styles.disabled]}
+                onPress={onRevealContact}
+                disabled={busy === 'contact'}
+              >
+                {busy === 'contact'
+                  ? <ActivityIndicator size="small" color={C.blue} />
+                  : <Text style={styles.secondaryText}>Reveal Contact (After Approval)</Text>}
+              </Pressable>
+
+              {claimContact?.phoneNumber ? (
+                <View style={styles.contactBox}>
+                  <Text style={styles.contactText}>{claimContact?.name || 'Owner'}: {claimContact.phoneNumber}</Text>
+                </View>
+              ) : null}
+            </>
+          )}
+
+          {canManage && !isRecovered && (
+            <Pressable
+              style={[styles.button, styles.secondary, busy === 'recover' && styles.disabled]}
+              onPress={onMarkRecovered}
+              disabled={busy === 'recover'}
+            >
+              {busy === 'recover'
+                ? <ActivityIndicator size="small" color={C.blue} />
+                : <Text style={styles.secondaryText}>Mark Returned</Text>}
+            </Pressable>
           )}
         </View>
 
-        {/* ── Details grid ── */}
-        <SectionHeader icon="clipboard-list-outline" title="Item Details" />
-        <View style={s.detailGrid}>
-          {DETAILS.map(d => <InfoChip key={d.key} icon={d.icon} label={d.label} value={d.value} />)}
-        </View>
-
-        {/* ── Actions ── */}
-        <SectionHeader icon="hand-coin-outline" title="Actions"
-          sub="Recommended options for this report." />
-        {actions.map(a => (
-          <OptionCard key={a.key} iconName={a.iconName} title={a.title}
-            subtitle={a.subtitle} onPress={a.onPress} tone={a.tone} disabled={a.disabled} />
-        ))}
-
-        {/* ── Claim section ── */}
-        {(canRequestClaim || claimStatus === 'pending' || (claimStatus === 'approved' && isClaimRequester)) && (
-          <View style={s.panel}>
-            <SectionHeader icon="shield-key-outline" title="Claim Verification" />
-            <View style={[s.claimStatusBadge, { backgroundColor: claimStatus === 'approved' ? C.greenBg : C.blueSoft }]}>
-              <Text style={[s.claimStatusTxt, { color: claimStatus === 'approved' ? C.green : C.blue }]}>
-                Status: {claimStatus.toUpperCase()}
-              </Text>
-            </View>
-
-            {canRequestClaim && showClaimForm && (item.secretQuestions || []).map((q, i) => (
-              <View key={i}>
-                <Text style={s.qLabel}>{q.question}</Text>
-                <TextInput style={s.input} value={claimAnswers[i] || ''} placeholderTextColor={C.textLight}
-                  placeholder="Your answer..." onChangeText={t => setClaimAnswers(p => p.map((a, idx) => idx === i ? t : a))} />
-              </View>
-            ))}
-            {canRequestClaim && showClaimForm && (
-              <>
-                <TextInput style={s.input} value={claimNote} onChangeText={setClaimNote}
-                  placeholder="Optional note to finder" placeholderTextColor={C.textLight} />
-                <OptionCard iconName="send-outline"
-                  title={claimLoading ? 'Submitting…' : 'Submit Claim'}
-                  subtitle="Finder will review your answers."
-                  onPress={onSubmitClaim} tone="primary" disabled={claimLoading} />
-              </>
-            )}
-            {canReviewClaim && (
-              <>
-                <OptionCard iconName="check-circle-outline" title={claimLoading ? 'Working…' : 'Approve Claim'}
-                  subtitle="Confirm owner and mark as returned." onPress={() => onReviewClaim('approve')}
-                  tone="success" disabled={claimLoading} />
-                <OptionCard iconName="close-circle-outline" title={claimLoading ? 'Working…' : 'Decline Claim'}
-                  subtitle="Reject this claim." onPress={() => onReviewClaim('decline')}
-                  tone="danger" disabled={claimLoading} />
-              </>
-            )}
-            {claimStatus === 'approved' && isClaimRequester && (
-              <>
-                <OptionCard iconName="phone-outline" title={claimLoading ? 'Loading…' : 'Reveal Contact'}
-                  subtitle="Shown only after claim approval." onPress={onRevealContact}
-                  tone="warning" disabled={claimLoading} />
-                {claimContact?.phoneNumber && (
-                  <View style={s.contactBox}>
-                    <AppIcon name="phone-check-outline" size={16} color={C.green} />
-                    <Text style={s.contactTxt}>{claimContact.name || 'Owner'} · {claimContact.phoneNumber}</Text>
-                  </View>
-                )}
-              </>
-            )}
-          </View>
-        )}
-
-        {/* ── Moderation ── */}
-        {!isGuest && (
-          <View style={s.panel}>
-            <SectionHeader icon="shield-account-outline" title="Safety & Moderation"
-              sub="Flag suspicious posts so admins can review them." />
-            <TextInput style={s.input} value={flagReason} onChangeText={setFlagReason}
-              placeholder="Reason for flagging" placeholderTextColor={C.textLight} />
-            <OptionCard iconName="flag-outline" title="Flag This Report"
-              subtitle="Submit to admin moderation." onPress={onFlag} tone="danger" />
-            {canManage && (
-              <OptionCard iconName="delete-outline" title="Delete Report"
-                subtitle="Permanently remove from the feed." onPress={onDelete} tone="danger" />
-            )}
-            {user?.role === 'admin' && approvalStatus === 'pending' && (
-              <>
-                <OptionCard
-                  iconName="check-circle-outline"
-                  title={claimLoading ? 'Working…' : 'Approve Report'}
-                  subtitle="Make this report visible on public home feed."
-                  onPress={() => onReviewApproval('approve')}
-                  tone="success"
-                  disabled={claimLoading}
-                />
-                <OptionCard
-                  iconName="close-circle-outline"
-                  title={claimLoading ? 'Working…' : 'Reject Report'}
-                  subtitle="Hide this report from user home feed."
-                  onPress={() => onReviewApproval('reject')}
-                  tone="danger"
-                  disabled={claimLoading}
-                />
-              </>
-            )}
-          </View>
-        )}
-
-        {/* ── Matches ── */}
-        <SectionHeader icon="target-account" title="Potential Matches"
-          sub={isGuest ? 'Sign in to see match confidence scores.' : 'AI-matched similar reports.'} />
-
-        {matchesLoading ? (
-          <View style={s.matchLoader}>
-            <ActivityIndicator size="small" color={C.blue} />
-            <Text style={s.matchMeta}>Checking similar reports…</Text>
-          </View>
-        ) : matches.length ? (
-          matches.slice(0, MATCH_LIMIT).map((entry, i) => {
-            const c = entry.item || entry;
-            const ms = getStatus(c?.status);
-            const pct = typeof entry.score === 'number' ? Math.round(entry.score * 100) : null;
-            return (
-              <Pressable key={c?._id || i}
-                style={({ pressed }) => [s.matchCard, pressed && { opacity: 0.88 }]}
-                onPress={() => navigation.push('ItemDetail', { item: c })}>
-                <View style={s.matchTop}>
-                  <Text style={s.matchTitle} numberOfLines={1}>{c?.title || 'Untitled'}</Text>
-                  <View style={[s.miniPill, { backgroundColor: ms.bg, borderColor: ms.border }]}>
-                    <Text style={[s.miniPillTxt, { color: ms.text }]}>{ms.label}</Text>
-                  </View>
-                </View>
-                <View style={s.matchMeta2}>
-                  <AppIcon name="map-marker-outline" size={11} color={C.textMid} />
-                  <Text style={s.matchMetaTxt} numberOfLines={1}>{c?.locationText || 'No location'}</Text>
-                  {pct !== null && (
-                    <>
-                      <View style={s.dot} />
-                      <Text style={s.matchMetaTxt}>Match: {pct}%</Text>
-                    </>
-                  )}
-                </View>
-                {pct !== null && (
-                  <View style={s.progressBar}>
-                    <View style={[s.progressFill, { width: `${pct}%`, backgroundColor: pct > 70 ? C.green : pct > 40 ? C.amber : C.red }]} />
-                  </View>
-                )}
+        <View style={styles.card}>
+          <View style={styles.actions}>
+            {isOwner && (
+              <Pressable style={[styles.button, styles.primary]} onPress={onEdit}>
+                <Text style={styles.primaryText}>Edit</Text>
               </Pressable>
-            );
-          })
-        ) : (
-          <View style={s.emptyMatches}>
-            <AppIcon name="magnify-close" size={24} color={C.textLight} />
-            <Text style={s.emptyMatchesTxt}>No strong matches found yet.</Text>
-          </View>
-        )}
+            )}
 
+            {canManage && (
+              <Pressable
+                style={[styles.button, styles.danger, busy === 'delete' && styles.disabled]}
+                onPress={onDelete}
+                disabled={busy === 'delete'}
+              >
+                {busy === 'delete'
+                  ? <ActivityIndicator size="small" color="#fff" />
+                  : <Text style={styles.dangerText}>Delete</Text>}
+              </Pressable>
+            )}
+          </View>
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
 };
 
-// ─── Styles ───────────────────────────────────────────────────────
-const s = StyleSheet.create({
+const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: C.bg },
   loaderWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: C.bg },
-  content: { paddingBottom: 32 },
+  content: { paddingBottom: 24 },
 
-  /* Hero */
-  hero: { height: 240, backgroundColor: C.blue },
-  heroImg: { width: '100%', height: '100%' },
-  heroOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.28)' },
-  heroTop: { position: 'absolute', top: 12, left: 12, right: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  backBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: 'rgba(0,0,0,0.35)', alignItems: 'center', justifyContent: 'center' },
-  statusPill: { flexDirection: 'row', alignItems: 'center', gap: 5, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1 },
-  statusTxt: { fontSize: 10, fontWeight: '800', letterSpacing: 0.8 },
-
-  /* Title */
-  titleBlock: { paddingHorizontal: 14, paddingTop: 14, paddingBottom: 4 },
-  title: { fontSize: 22, fontWeight: '800', color: C.textDark, marginBottom: 6 },
-  desc: { fontSize: 13, color: C.textMid, lineHeight: 20 },
-  approvalBadge: {
-    alignSelf: 'flex-start',
-    marginTop: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 999,
+  image: {
+    width: '100%',
+    height: 260,
+    backgroundColor: '#e5e7eb',
   },
-  approvalBadgeText: { fontSize: 11, fontWeight: '800' },
-  approvalPending: { backgroundColor: '#fff7ed' },
-  approvalPendingText: { color: '#9a3412' },
-  approvalRejected: { backgroundColor: '#ffe4e6' },
-  approvalRejectedText: { color: '#9f1239' },
 
-  /* Section header */
-  secTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14 },
-  secIconWrap: { width: 28, height: 28, borderRadius: 8, backgroundColor: C.blueSoft, alignItems: 'center', justifyContent: 'center' },
-  secTitle: { fontSize: 15, fontWeight: '800', color: C.textDark },
-  secSub: { fontSize: 11, color: C.textMid, marginTop: 3, paddingHorizontal: 14 },
+  card: {
+    marginTop: 12,
+    marginHorizontal: 12,
+    backgroundColor: C.card,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 16,
+    padding: 14,
+  },
 
-  /* Detail grid */
-  detailGrid: { paddingHorizontal: 14, flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  infoChip: { width: '47.5%', backgroundColor: C.card, borderRadius: 12, borderWidth: 0.5, borderColor: C.border, padding: 10, flexDirection: 'row', gap: 8, alignItems: 'flex-start' },
-  infoChipIcon: { width: 26, height: 26, borderRadius: 7, backgroundColor: C.blueSoft, alignItems: 'center', justifyContent: 'center' },
-  infoChipLabel: { fontSize: 9, fontWeight: '700', color: C.textMid, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 2 },
-  infoChipValue: { fontSize: 12, fontWeight: '600', color: C.textDark },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  title: { flex: 1, fontSize: 22, fontWeight: '800', color: C.text, marginRight: 8 },
+  statusBadge: { borderRadius: 999, paddingHorizontal: 9, paddingVertical: 4 },
+  statusText: { fontSize: 11, fontWeight: '800' },
 
-  /* OptionCard */
-  optionCard: { marginHorizontal: 14, marginBottom: 8, borderRadius: 12, borderWidth: 1, padding: 12, flexDirection: 'row', alignItems: 'center', gap: 10 },
-  optionIcon: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
-  optionTitle: { fontSize: 13, fontWeight: '800', marginBottom: 2 },
-  optionSub: { fontSize: 11, lineHeight: 15 },
+  desc: { fontSize: 14, color: C.muted, lineHeight: 20, marginBottom: 14 },
 
-  /* Panel (claim / moderation) */
-  panel: { marginHorizontal: 14, marginTop: 4, backgroundColor: C.card, borderRadius: 14, borderWidth: 0.5, borderColor: C.border, paddingBottom: 12 },
-  claimStatusBadge: { marginHorizontal: 14, marginBottom: 8, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, alignSelf: 'flex-start' },
-  claimStatusTxt: { fontSize: 11, fontWeight: '700' },
-  qLabel: { fontSize: 12, fontWeight: '600', color: C.textDark, marginHorizontal: 14, marginBottom: 4 },
-  input: { marginHorizontal: 14, marginBottom: 8, borderWidth: 1, borderColor: C.border, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, backgroundColor: C.bg, color: C.textDark, fontSize: 13 },
-  contactBox: { marginHorizontal: 14, marginTop: 6, flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: C.greenBg, borderRadius: 10, padding: 10 },
-  contactTxt: { fontSize: 13, fontWeight: '700', color: C.textDark },
+  infoRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
+  infoText: { color: C.text, fontSize: 13 },
 
-  /* Match */
-  matchLoader: { marginHorizontal: 14, flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, backgroundColor: C.card, borderRadius: 12, borderWidth: 0.5, borderColor: C.border },
-  matchMeta: { fontSize: 12, color: C.textMid },
-  matchCard: { marginHorizontal: 14, marginBottom: 8, backgroundColor: C.card, borderRadius: 12, borderWidth: 0.5, borderColor: C.border, padding: 12 },
-  matchTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 },
-  matchTitle: { flex: 1, fontSize: 14, fontWeight: '700', color: C.textDark, paddingRight: 8 },
-  miniPill: { borderRadius: 999, borderWidth: 1, paddingHorizontal: 7, paddingVertical: 3 },
-  miniPillTxt: { fontSize: 9, fontWeight: '800' },
-  matchMeta2: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 8 },
-  matchMetaTxt: { fontSize: 11, color: C.textMid },
-  dot: { width: 3, height: 3, borderRadius: 2, backgroundColor: C.textLight },
-  progressBar: { height: 4, backgroundColor: C.borderSoft, borderRadius: 4, overflow: 'hidden' },
-  progressFill: { height: '100%', borderRadius: 4 },
-  emptyMatches: { marginHorizontal: 14, alignItems: 'center', gap: 6, paddingVertical: 20 },
-  emptyMatchesTxt: { fontSize: 13, color: C.textLight },
+  sectionTitle: { fontSize: 16, fontWeight: '800', color: C.text, marginBottom: 8 },
+  stepText: { color: C.muted, fontSize: 12, marginBottom: 4 },
+
+  actions: { gap: 8 },
+  actionsRow: { flexDirection: 'row', gap: 8, marginTop: 8 },
+
+  claimFormWrap: { marginTop: 8, gap: 8 },
+  claimQuestion: { color: C.text, fontSize: 12, fontWeight: '700', marginBottom: 4 },
+  input: {
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    color: C.text,
+    backgroundColor: '#fff',
+  },
+  claimStatusWrap: {
+    marginTop: 8,
+    paddingVertical: 8,
+  },
+  claimStatusText: { color: C.text, fontWeight: '700', fontSize: 12 },
+
+  button: {
+    minHeight: 42,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    marginTop: 8,
+  },
+  halfButton: { flex: 1 },
+  primary: { backgroundColor: C.blue, borderColor: C.blue },
+  secondary: { backgroundColor: '#eff6ff', borderColor: '#bfdbfe' },
+  warning: { backgroundColor: '#fff7ed', borderColor: '#fed7aa' },
+  danger: { backgroundColor: C.red, borderColor: C.red },
+
+  primaryText: { color: '#fff', fontWeight: '700' },
+  secondaryText: { color: C.blue, fontWeight: '700' },
+  warningText: { color: '#9a3412', fontWeight: '700' },
+  dangerText: { color: '#fff', fontWeight: '700' },
+  disabled: { opacity: 0.6 },
+
+  contactBox: {
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: '#bbf7d0',
+    backgroundColor: '#ecfdf3',
+    borderRadius: 10,
+    padding: 10,
+  },
+  contactText: { color: '#166534', fontWeight: '700' },
 });
 
 export default ItemDetailScreen;

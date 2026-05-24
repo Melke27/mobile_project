@@ -113,6 +113,10 @@ const ChatScreen = ({ route, navigation }) => {
         <AppIcon name="chat-processing-outline" size={18} color="#1e434a" />
         <Text style={styles.header}>{canChat ? `Chat about: ${item.title || 'Item'}` : 'Campus Chat'}</Text>
       </View>
+      <View style={styles.noticeWrap}>
+        <AppIcon name="shield-lock-outline" size={14} color="#1a6edb" />
+        <Text style={styles.noticeText}>Private chat only. No phone numbers are shared in chat.</Text>
+      </View>
 
       <FlatList
         data={messages}
@@ -180,6 +184,19 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#f5f7fb' },
   headerWrap: { padding: 12, flexDirection: 'row', alignItems: 'center', gap: 6 },
   header: { fontWeight: '700', color: '#1e434a' },
+  noticeWrap: {
+    marginHorizontal: 12,
+    marginBottom: 6,
+    padding: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#bfdbfe',
+    backgroundColor: '#eff6ff',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  noticeText: { flex: 1, color: '#1d4f91', fontSize: 11, fontWeight: '600' },
   bubble: {
     maxWidth: '82%',
     borderRadius: 10,

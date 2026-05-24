@@ -20,9 +20,9 @@ const C = {
   muted:    '#6b7280',
 };
 
-const DEFAULT_FILTERS = { keyword: '', status: '', category: '' };
+const DEFAULT_FILTERS = { keyword: '', status: '', category: '', location: '' };
 
-const SearchScreen = ({ navigation }) => {
+const SearchScreen = ({ navigation, route }) => {
   const { searchReports } = useItems();
 
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
@@ -42,8 +42,12 @@ const SearchScreen = ({ navigation }) => {
   }, [searchReports]);
 
   useEffect(() => {
-    runSearch(DEFAULT_FILTERS);
-  }, [runSearch]);
+    const initialFilters = route?.params?.initialFilters
+      ? { ...DEFAULT_FILTERS, ...route.params.initialFilters }
+      : DEFAULT_FILTERS;
+    setFilters(initialFilters);
+    runSearch(initialFilters);
+  }, [route?.params?.initialFilters, runSearch]);
 
   const onSearch = () => runSearch(filters);
   const onReset = () => {

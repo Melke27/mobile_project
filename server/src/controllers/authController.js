@@ -14,7 +14,7 @@ const isValidPhone = (phone = '') => {
   return /^[+]?[\d\s\-()]{7,20}$/.test(phone);
 };
 
-const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || 'admin@lafms.app')
+const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || 'admin@findit.app')
   .split(',')
   .map((email) => normalizeEmail(email))
   .filter(Boolean);

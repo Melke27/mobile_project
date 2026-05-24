@@ -8,6 +8,7 @@ import {
   SafeAreaView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import { useItems } from '../context/ItemsContext';
@@ -20,7 +21,7 @@ const FEED_FILTERS = [
   { key: 'all', label: 'All', icon: 'view-grid-outline' },
   { key: 'lost', label: 'Lost', icon: 'help-circle-outline' },
   { key: 'found', label: 'Found', icon: 'hand-coin-outline' },
-  { key: 'recovered', label: 'Recovered', icon: 'check-circle-outline' },
+  { key: 'recovered', label: 'Returned', icon: 'check-circle-outline' },
 ];
 
 const StatusMiniCard = ({ icon, label, value, color }) => (
@@ -35,10 +36,11 @@ const normalizeStatus = (status = '') => (status === 'returned' ? 'recovered' : 
 
 const HomeScreen = ({ navigation }) => {
   const { items, loadLatest, loading } = useItems();
-  const { user } = useAuth();
+  const { user, isAdmin } = useAuth();
 
   const [loadError, setLoadError] = useState('');
   const [feedFilter, setFeedFilter] = useState('all');
+  const [homeKeyword, setHomeKeyword] = useState('');
 
   const safeItems = Array.isArray(items) ? items : [];
 
@@ -69,9 +71,21 @@ const HomeScreen = ({ navigation }) => {
     return { lost, found, recovered, total: safeItems.length };
   }, [safeItems]);
 
-  const filteredItems = useMemo(() => (
-    feedFilter === 'all' ? safeItems : safeItems.filter((item) => normalizeStatus(item?.status) === feedFilter)
-  ), [feedFilter, safeItems]);
+  const filteredItems = useMemo(() => {
+    const byStatus = feedFilter === 'all'
+      ? safeItems
+      : safeItems.filter((item) => normalizeStatus(item?.status) === feedFilter);
+
+    const q = homeKeyword.trim().toLowerCase();
+    if (!q) {
+      return byStatus;
+    }
+
+    return byStatus.filter((item) => {
+      const haystack = `${item?.title || ''} ${item?.description || ''} ${item?.category || ''} ${item?.locationText || ''}`.toLowerCase();
+      return haystack.includes(q);
+    });
+  }, [feedFilter, homeKeyword, safeItems]);
 
   const userLabel = user?.name ? user.name.split(' ')[0] : 'Guest';
   const dateLabel = useMemo(
@@ -94,15 +108,20 @@ const HomeScreen = ({ navigation }) => {
         <Text style={styles.heroSub}>Lost something on campus? Report fast and track updates from one place.</Text>
 
         <View style={styles.heroCtaRow}>
-          <Pressable
-            style={[styles.ctaButton, styles.ctaPrimary]}
-            onPress={() => (user ? navigation.navigate('Post') : requireLogin())}
-          >
-            <AppIcon name="plus" size={16} color="#fff" />
-            <Text style={styles.ctaPrimaryText}>Report Item</Text>
-          </Pressable>
+          {!isAdmin && (
+            <Pressable
+              style={[styles.ctaButton, styles.ctaPrimary]}
+              onPress={() => (user ? navigation.navigate('Post') : requireLogin())}
+            >
+              <AppIcon name="plus" size={16} color="#fff" />
+              <Text style={styles.ctaPrimaryText}>Report Item</Text>
+            </Pressable>
+          )}
 
-          <Pressable style={[styles.ctaButton, styles.ctaGhost]} onPress={() => navigation.navigate('Search')}>
+          <Pressable
+            style={[styles.ctaButton, styles.ctaGhost, isAdmin && styles.ctaFullWidth]}
+            onPress={() => navigation.navigate('Search')}
+          >
             <AppIcon name="magnify" size={16} color="#1a6edb" />
             <Text style={styles.ctaGhostText}>Search</Text>
           </Pressable>
@@ -112,7 +131,7 @@ const HomeScreen = ({ navigation }) => {
       <View style={styles.statsRow}>
         <StatusMiniCard icon="help-circle-outline" label="Lost" value={summary.lost} color="#a11b48" />
         <StatusMiniCard icon="hand-coin-outline" label="Found" value={summary.found} color="#0f6f4f" />
-        <StatusMiniCard icon="check-circle-outline" label="Recovered" value={summary.recovered} color="#2443a5" />
+        <StatusMiniCard icon="check-circle-outline" label="Returned" value={summary.recovered} color="#2443a5" />
       </View>
 
       <View style={styles.feedTitleRow}>
@@ -120,6 +139,31 @@ const HomeScreen = ({ navigation }) => {
         <Text style={styles.feedCount}>{summary.total}</Text>
       </View>
       <Text style={styles.feedSub}>Pull down to refresh the feed.</Text>
+
+      <View style={styles.searchRow}>
+        <View style={styles.searchInputWrap}>
+          <AppIcon name="magnify" size={16} color="#607780" />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search reports on home..."
+            placeholderTextColor="#607780"
+            value={homeKeyword}
+            onChangeText={setHomeKeyword}
+            returnKeyType="search"
+          />
+          {!!homeKeyword && (
+            <Pressable onPress={() => setHomeKeyword('')}>
+              <AppIcon name="close-circle" size={16} color="#607780" />
+            </Pressable>
+          )}
+        </View>
+        <Pressable
+          style={styles.searchButton}
+          onPress={() => navigation.navigate('Search', { initialFilters: { keyword: homeKeyword } })}
+        >
+          <Text style={styles.searchButtonText}>Advanced</Text>
+        </Pressable>
+      </View>
 
       <View style={styles.filtersRow}>
         {FEED_FILTERS.map((entry) => {
@@ -183,7 +227,7 @@ const HomeScreen = ({ navigation }) => {
             title="No Reports Yet"
             message="Start by posting a lost or found item."
             actionLabel="Create First Report"
-            onAction={() => (user ? navigation.navigate('Post') : requireLogin())}
+            onAction={() => (user && !isAdmin ? navigation.navigate('Post') : navigation.navigate('Search'))}
           />
         )}
       />
@@ -219,6 +263,7 @@ const styles = StyleSheet.create({
   heroSub: { color: '#577078', fontSize: 13, marginTop: 5, lineHeight: 19 },
 
   heroCtaRow: { flexDirection: 'row', gap: 8, marginTop: 12 },
+  ctaFullWidth: { flex: 1 },
   ctaButton: {
     flex: 1,
     borderRadius: 10,
@@ -261,6 +306,29 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   feedSub: { color: '#607780', marginTop: 2, fontSize: 12, fontWeight: '600' },
+  searchRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10 },
+  searchInputWrap: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderColor: '#cedce3',
+    borderRadius: 10,
+    backgroundColor: '#fff',
+    paddingHorizontal: 10,
+    minHeight: 42,
+  },
+  searchInput: { flex: 1, color: '#123944', fontSize: 13, paddingVertical: 0 },
+  searchButton: {
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#c8d8e3',
+    backgroundColor: '#f7fbff',
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+  },
+  searchButtonText: { color: '#1a6edb', fontWeight: '800', fontSize: 12 },
 
   filtersRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 },
   filterChip: {

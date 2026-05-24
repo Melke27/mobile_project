@@ -33,7 +33,13 @@ const IconInput = ({ iconName, style, value = '', onClear, ...props }) => {
 
 const StatusButton = ({ value, current, onSelect }) => {
   const active = value === current;
-  const iconName = value === 'lost' ? 'help-circle-outline' : 'hand-coin-outline';
+  const iconName =
+    value === 'lost'
+      ? 'help-circle-outline'
+      : value === 'found'
+        ? 'hand-coin-outline'
+        : 'check-circle-outline';
+  const label = value === 'recovered' ? 'RETURNED' : value.toUpperCase();
 
   return (
     <Pressable
@@ -42,7 +48,7 @@ const StatusButton = ({ value, current, onSelect }) => {
     >
       <AppIcon name={iconName} size={16} color={active ? '#ffffff' : C.muted} />
       <Text style={[styles.statusButtonText, active && styles.statusButtonTextActive]}>
-        {value.toUpperCase()}
+        {label}
       </Text>
     </Pressable>
   );
@@ -83,6 +89,17 @@ const FilterBar = ({ filters, onChange, onSearch, onReset, loading = false }) =>
         onClear={() => onChange({ ...filters, category: '' })}
       />
 
+      <IconInput
+        iconName="map-marker-outline"
+        placeholder="Location"
+        value={filters.location || ''}
+        onChangeText={(text) => onChange({ ...filters, location: text })}
+        autoCapitalize="words"
+        returnKeyType="done"
+        onSubmitEditing={onSearch}
+        onClear={() => onChange({ ...filters, location: '' })}
+      />
+
       <View style={styles.statusRow}>
         <StatusButton
           value="lost"
@@ -91,6 +108,11 @@ const FilterBar = ({ filters, onChange, onSearch, onReset, loading = false }) =>
         />
         <StatusButton
           value="found"
+          current={filters.status}
+          onSelect={(status) => onChange({ ...filters, status })}
+        />
+        <StatusButton
+          value="recovered"
           current={filters.status}
           onSelect={(status) => onChange({ ...filters, status })}
         />
@@ -145,11 +167,13 @@ const styles = StyleSheet.create({
 
   statusRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 8,
     marginBottom: 10,
   },
   statusButton: {
     flex: 1,
+    minWidth: 90,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',

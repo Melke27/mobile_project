@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 const Message = require('../models/Message');
 const Item = require('../models/Item');
+const User = require('../models/User');
 const Notification = require('../models/Notification');
 
 const composeConversationId = (a, b, itemId) => [a, b].sort().join('_') + `_${itemId}`;
@@ -39,9 +40,133 @@ const listConversation = async (req, res, next) => {
     }
 
     const conversationId = composeConversationId(currentUserId, otherUserId, itemId);
+
+    await Message.updateMany(
+      {
+        conversationId,
+        receiverId: req.user._id,
+        readAt: null,
+      },
+      {
+        $set: { readAt: new Date() },
+      }
+    );
+
     const messages = await Message.find({ conversationId }).sort({ createdAt: 1 });
 
     return res.json({ messages, conversationId });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+const listConversations = async (req, res, next) => {
+  try {
+    const currentUserId = req.user._id;
+    const currentUserIdStr = currentUserId.toString();
+
+    const messages = await Message.find({
+      $or: [{ senderId: currentUserId }, { receiverId: currentUserId }],
+    })
+      .sort({ createdAt: -1 })
+      .limit(800)
+      .lean();
+
+    const latestByConversation = new Map();
+    const itemIds = new Set();
+    const otherUserIds = new Set();
+
+    messages.forEach((entry) => {
+      if (!latestByConversation.has(entry.conversationId)) {
+        latestByConversation.set(entry.conversationId, entry);
+
+        const senderId = entry.senderId?.toString();
+        const receiverId = entry.receiverId?.toString();
+        const otherId = senderId === currentUserIdStr ? receiverId : senderId;
+
+        if (entry.itemId) {
+          itemIds.add(entry.itemId.toString());
+        }
+        if (otherId) {
+          otherUserIds.add(otherId);
+        }
+      }
+    });
+
+    const conversationIds = [...latestByConversation.keys()];
+    const unreadAgg = conversationIds.length
+      ? await Message.aggregate([
+          {
+            $match: {
+              conversationId: { $in: conversationIds },
+              receiverId: currentUserId,
+              readAt: null,
+            },
+          },
+          {
+            $group: {
+              _id: '$conversationId',
+              count: { $sum: 1 },
+            },
+          },
+        ])
+      : [];
+
+    const unreadByConversation = unreadAgg.reduce((acc, row) => {
+      acc[row._id] = row.count;
+      return acc;
+    }, {});
+
+    const [items, users] = await Promise.all([
+      itemIds.size
+        ? Item.find({ _id: { $in: [...itemIds] } }).select('_id title status approvalStatus').lean()
+        : [],
+      otherUserIds.size
+        ? User.find({ _id: { $in: [...otherUserIds] } }).select('_id name').lean()
+        : [],
+    ]);
+
+    const itemById = new Map(items.map((entry) => [entry._id.toString(), entry]));
+    const userById = new Map(users.map((entry) => [entry._id.toString(), entry]));
+
+    const conversations = [...latestByConversation.values()].map((entry) => {
+      const senderId = entry.senderId?.toString();
+      const receiverId = entry.receiverId?.toString();
+      const otherUserId = senderId === currentUserIdStr ? receiverId : senderId;
+      const itemId = entry.itemId?.toString() || '';
+      const item = itemById.get(itemId);
+      const otherUser = userById.get(otherUserId);
+
+      return {
+        conversationId: entry.conversationId,
+        itemId,
+        itemTitle: item?.title || 'Unknown Item',
+        itemStatus: item?.status || '',
+        approvalStatus: item?.approvalStatus || '',
+        otherUserId,
+        otherUserName: otherUser?.name || 'User',
+        lastMessage: entry.message,
+        lastMessageAt: entry.createdAt,
+        unreadCount: unreadByConversation[entry.conversationId] || 0,
+      };
+    });
+
+    conversations.sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime());
+
+    return res.json({ conversations });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+const getUnreadCount = async (req, res, next) => {
+  try {
+    const unreadCount = await Message.countDocuments({
+      receiverId: req.user._id,
+      readAt: null,
+    });
+
+    return res.json({ unreadCount });
   } catch (error) {
     return next(error);
   }
@@ -82,6 +207,7 @@ const sendMessage = async (req, res, next) => {
       senderId: req.user._id,
       receiverId,
       message: message.trim(),
+      readAt: null,
     });
 
     Notification.create({
@@ -98,4 +224,10 @@ const sendMessage = async (req, res, next) => {
   }
 };
 
-module.exports = { listConversation, sendMessage, composeConversationId };
+module.exports = {
+  listConversation,
+  listConversations,
+  getUnreadCount,
+  sendMessage,
+  composeConversationId,
+};

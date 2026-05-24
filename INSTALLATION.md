@@ -112,7 +112,7 @@ Either run:
 ```bash
 npm run android
 ```
-Or open the app manually on your phone (look for **LAFMS** icon)
+Or open the app manually on your phone (look for **Findit** icon)
 
 ---
 
@@ -251,7 +251,7 @@ ANDROID_SERIAL=ABC123 npm run android:usb:device
 ### **Login Screen:**
 The login screen features a modern teal gradient background with:
 - White logo at the top
-- LAFMS branding and description
+- Findit branding and description
 - Email and password fields with eye icon for password visibility toggle
 - Remember me checkbox
 - Sign in button

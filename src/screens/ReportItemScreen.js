@@ -44,9 +44,25 @@ const defaultForm = {
   secretQuestions: [{ question: '', answer: '' }],
 };
 
-const ReportItemScreen = ({ navigation }) => {
-  const { createReport } = useItems();
+const buildEditForm = (item = {}) => ({
+  status: item?.status === 'found' ? 'found' : 'lost',
+  title: item?.title || '',
+  description: item?.description || '',
+  category: item?.category || 'Other',
+  otherItemName: '',
+  locationText: item?.locationText || '',
+  imageUrl: item?.imageUrl || '',
+  lastSeenHint: '',
+  secretQuestions: Array.isArray(item?.secretQuestions) && item.secretQuestions.length
+    ? item.secretQuestions.map((entry) => ({ question: entry?.question || '', answer: '' }))
+    : [{ question: '', answer: '' }],
+});
+
+const ReportItemScreen = ({ route, navigation }) => {
+  const { createReport, updateReport } = useItems();
   const { user } = useAuth();
+  const editItem = route?.params?.item || null;
+  const isEditMode = route?.params?.mode === 'edit' && Boolean(editItem?._id);
 
   const [form, setForm] = useState(defaultForm);
   const [submitting, setSubmitting] = useState(false);
@@ -60,19 +76,26 @@ const ReportItemScreen = ({ navigation }) => {
 
   // Draft persistence
   useEffect(() => {
+    if (isEditMode) {
+      skipDraft.current = true;
+      setForm(buildEditForm(editItem));
+      draftReady.current = true;
+      return;
+    }
+
     storageService.getJSON(storageService.keys.LAST_REPORT_DRAFT, null).then(draft => {
       if (draft) setForm({ ...defaultForm, ...draft });
       draftReady.current = true;
     });
-  }, []);
+  }, [editItem, isEditMode]);
 
   useEffect(() => {
-    if (!draftReady.current) return;
+    if (!draftReady.current || isEditMode) return;
     if (skipDraft.current) { skipDraft.current = false; return; }
     const t = setTimeout(() => 
       storageService.setJSON(storageService.keys.LAST_REPORT_DRAFT, form).catch(console.warn), 400);
     return () => clearTimeout(t);
-  }, [form]);
+  }, [form, isEditMode]);
 
   const getAutoTitle = (status, category, otherItemName) =>
     category === 'Other' && otherItemName?.trim()
@@ -143,27 +166,43 @@ const ReportItemScreen = ({ navigation }) => {
     setBusyAction('submit');
 
     try {
-      await createReport({
-        ...form,
-        title,
-        description: form.description.trim(),
-        locationText: form.locationText.trim(),
-        imageUrl: form.imageUrl || generateItemImageUrl(form),
-        campus: DEFAULT_CAMPUS,
-        secretQuestions: form.status === 'found' 
-          ? form.secretQuestions.filter(q => q.question && q.answer) 
-          : [],
-      });
+      if (isEditMode) {
+        await updateReport(editItem._id, {
+          status: form.status,
+          title,
+          description: form.description.trim(),
+          locationText: form.locationText.trim(),
+          category: form.category,
+          imageUrl: form.imageUrl || '',
+          secretQuestions: form.status === 'found'
+            ? form.secretQuestions.filter(q => q.question && q.answer)
+            : [],
+        });
+        Alert.alert('Success', user?.role === 'admin' ? 'Report updated.' : 'Report updated. It may wait for admin approval.');
+        navigation.goBack();
+      } else {
+        await createReport({
+          ...form,
+          title,
+          description: form.description.trim(),
+          locationText: form.locationText.trim(),
+          imageUrl: form.imageUrl || generateItemImageUrl(form),
+          campus: DEFAULT_CAMPUS,
+          secretQuestions: form.status === 'found'
+            ? form.secretQuestions.filter(q => q.question && q.answer)
+            : [],
+        });
 
-      skipDraft.current = true;
-      setForm(defaultForm);
-      await storageService.remove(storageService.keys.LAST_REPORT_DRAFT);
-      Alert.alert(
-        'Success',
-        user?.role === 'admin'
-          ? 'Report posted and visible now.'
-          : 'Report submitted. It will be visible after admin approval.'
-      );
+        skipDraft.current = true;
+        setForm(defaultForm);
+        await storageService.remove(storageService.keys.LAST_REPORT_DRAFT);
+        Alert.alert(
+          'Success',
+          user?.role === 'admin'
+            ? 'Report posted and visible now.'
+            : 'Report submitted. It will be visible after admin approval.'
+        );
+      }
     } catch (e) {
       Alert.alert('Failed', e?.response?.data?.message || 'Could not post report.');
     } finally {
@@ -193,7 +232,7 @@ const ReportItemScreen = ({ navigation }) => {
         <View style={s.header}>
           <View style={s.headerLeft}>
             <AppIcon name="plus-circle-outline" size={22} color={C.white} />
-            <Text style={s.headerTitle}>Post an Item</Text>
+            <Text style={s.headerTitle}>{isEditMode ? 'Edit Report' : 'Post an Item'}</Text>
           </View>
           
           {/* Lost / Found Toggle */}
@@ -375,7 +414,7 @@ const ReportItemScreen = ({ navigation }) => {
             {submitting ? (
               <ActivityIndicator color="#fff" />
             ) : (
-              <Text style={s.submitTxt}>POST {form.status.toUpperCase()} ITEM</Text>
+              <Text style={s.submitTxt}>{isEditMode ? 'UPDATE REPORT' : `POST ${form.status.toUpperCase()} ITEM`}</Text>
             )}
           </Pressable>
 

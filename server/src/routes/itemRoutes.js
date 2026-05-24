@@ -11,6 +11,7 @@ const {
   flagItem,
   getFlaggedItems,
   getPendingApprovalItems,
+  getPendingClaimItems,
   reviewFlaggedItem,
   reviewItemApproval,
   deleteItem,
@@ -24,6 +25,7 @@ const router = express.Router();
 router.get('/', optionalAuth, listItems);
 router.get('/flagged/list', requireAuth, requireAdmin, getFlaggedItems);
 router.get('/approval/pending', requireAuth, requireAdmin, getPendingApprovalItems);
+router.get('/claims/pending', requireAuth, requireAdmin, getPendingClaimItems);
 router.get('/admin/stats', requireAuth, requireAdmin, getAdminStats);
 router.get('/:id/matches', requireAuth, getPotentialMatches);
 router.get('/:id', optionalAuth, getItemById);

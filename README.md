@@ -1,8 +1,8 @@
-# Campus Lost & Found (Mobile + API)
+# Findit (Mobile + API)
 
 React Native mobile app with Node.js/Express API and MongoDB.
 
-This project helps students and staff report lost/found items, search reports, chat, and recover items faster.
+This project helps students and staff report lost/found items, search reports, and recover items faster.
 
 ## Tech Stack
 
@@ -13,15 +13,63 @@ This project helps students and staff report lost/found items, search reports, c
 
 ## Core Features
 
-- Register/Login
-- Lost and found report creation (photo + location)
-- Search and filters
-- Item details + potential matches
-- Chat between users
-- Save/bookmark reports locally
-- Notification center (in-app)
-- Admin moderation and dashboard
-- Ownership verification token
+### 👤 Authentication
+- Register with name, email, password
+- Login with email, password
+- Role-based routing (user vs admin)
+
+### 🏠 Home Screen
+- List of lost/found posts
+- Urgency badges (ID / Exam Permit highlighted)
+- Status indicator (Lost / Found / Returned)
+- Home search bar + quick filtering
+
+### ➕ Post Item
+- Choose Lost or Found
+- Add title, description, category
+- Upload photo
+- Add location text (supports Google Maps pin text/link)
+- Add secret questions (for found items)
+- Edit post
+- Delete post
+
+### 🔍 Search & Filter
+- Search by keywords
+- Filter by category
+- Filter by location
+- Filter by status
+
+### ✅ Claim System
+- "This is Mine!" button
+- Answer secret questions
+- Finder/admin confirms or declines claim
+- If confirmed: owner contact can be revealed
+- Status changes to Returned
+
+### 💬 Messaging
+- In-app chat between users
+- Anonymous chat (no phone numbers in chat)
+- Unread message badge
+
+### 🔔 Notifications
+- Match found alerts
+- Claim request received alerts
+- Claim approved/declined alerts
+
+### 📊 Status Tracking
+- Lost → Reported → Match Found → Claimed → Returned
+
+### ⏰ Auto Expire
+- Posts auto-archive after 30 days
+
+### 🛡 Admin Panel
+- View all posts
+- Delete inappropriate/fake posts
+- View all users
+- Ban/suspend users
+- Resolve disputed claims
+- Analytics (total posts, recovered items, most lost category)
+- Approve/reject pending posts
 
 ## Architecture Overview
 
@@ -256,9 +304,9 @@ Display Note: This alternate home variation supports continuous image-led browsi
 
 ### Login
 
-The Login screen provides secure access to reporting, chat, saved items, and recovery actions for authenticated users.
+The Login screen provides secure access to reporting and recovery actions for authenticated users.
 
-Display Note: This login display is the secure gateway to protected workflows (report, chat, saved, verify). User Action: sign in once; Outcome: access to identity-linked features and safer moderated interactions.
+Display Note: This login display is the secure gateway to protected workflows (report and verify). User Action: sign in once; Outcome: access to identity-linked features and safer moderated interactions.
 
 ### Reports
 

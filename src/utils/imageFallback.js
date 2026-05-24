@@ -2,7 +2,7 @@ const ITEM_IMAGE_BASE_URL = 'https://api.dicebear.com/9.x/shapes/png';
 
 const normalizeSeed = (value) => {
   const raw = typeof value === 'string' ? value.trim() : '';
-  return raw || 'lafms-item';
+  return raw || 'findit-item';
 };
 
 export const generateItemImageUrl = (item = {}) => {

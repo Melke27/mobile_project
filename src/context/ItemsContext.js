@@ -205,6 +205,7 @@ export const ItemsProvider = ({ children }) => {
       recordViewedItem,
       getFlaggedReports: itemService.getFlaggedReports,
       getPendingApprovalReports: itemService.getPendingApprovalReports,
+      getPendingClaimReports: itemService.getPendingClaimReports,
       getAdminStats: itemService.getAdminStats,
     }),
     [

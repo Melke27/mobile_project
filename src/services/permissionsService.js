@@ -61,7 +61,7 @@ export const permissionsService = {
     return request(
       PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS,
       'Notification Permission',
-      'Notifications help you receive match and chat alerts.'
+      'Notifications help you receive report updates.'
     );
   },
 };

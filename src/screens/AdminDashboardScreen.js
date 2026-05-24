@@ -2,19 +2,19 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  FlatList,
   Pressable,
   RefreshControl,
   SafeAreaView,
+  ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 import AppIcon from '../components/AppIcon';
 import EmptyState from '../components/EmptyState';
 import { useAuth } from '../context/AuthContext';
 import { useItems } from '../context/ItemsContext';
+import { authService } from '../services/authService';
 
 const C = {
   blue: '#1a6edb',
@@ -23,19 +23,27 @@ const C = {
   border: '#e5e7eb',
   text: '#111827',
   muted: '#6b7280',
+  green: '#15803d',
   red: '#b42318',
+  orange: '#9a3412',
 };
 
-const STATUS_FILTERS = [
-  { key: 'all', label: 'All' },
-  { key: 'lost', label: 'Lost' },
-  { key: 'found', label: 'Found' },
-  { key: 'recovered', label: 'Recovered' },
+const TABS = [
+  { key: 'posts', label: 'All Posts' },
+  { key: 'approvals', label: 'Approvals' },
+  { key: 'claims', label: 'Claims' },
+  { key: 'users', label: 'Users' },
+  { key: 'analytics', label: 'Analytics' },
 ];
 
 const normalizeStatus = (status = '') => (String(status).toLowerCase() === 'returned' ? 'recovered' : String(status).toLowerCase());
+const fmt = (value) => {
+  if (!value) return 'Unknown';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? 'Unknown' : date.toLocaleString();
+};
 
-const statusColor = (status) => {
+const statusStyle = (status) => {
   const key = normalizeStatus(status);
   if (key === 'lost') return { bg: '#fff0f0', text: '#cc2222' };
   if (key === 'found') return { bg: '#e8f5e9', text: '#1b5e20' };
@@ -43,207 +51,138 @@ const statusColor = (status) => {
   return { bg: '#f3f4f6', text: C.muted };
 };
 
-const fmt = (value) => {
-  if (!value) return 'Unknown';
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? 'Unknown' : date.toLocaleString();
+const approvalStyle = (status) => {
+  const key = String(status || '').toLowerCase();
+  if (key === 'approved') return { bg: '#ecfdf3', text: '#15803d' };
+  if (key === 'rejected') return { bg: '#ffe4e6', text: '#be123c' };
+  return { bg: '#fff7ed', text: '#9a3412' };
 };
 
-const SummaryCard = ({ label, value, icon, color = '#1a6edb', bg = '#eff6ff' }) => (
-  <View style={[styles.summaryCard, { backgroundColor: bg }]}> 
-    <AppIcon name={icon} size={17} color={color} />
-    <Text style={[styles.summaryValue, { color }]}>{value}</Text>
-    <Text style={[styles.summaryLabel, { color }]}>{label}</Text>
-  </View>
-);
-
-const ActionButton = ({ icon, label, onPress, tone = 'neutral', disabled, loading }) => {
+const MiniButton = ({ label, onPress, tone = 'neutral', disabled, busy }) => {
   const palette =
     tone === 'danger'
-      ? { bg: '#fff1f2', border: '#fecdd3', text: '#b42318' }
+      ? { bg: '#b42318', border: '#b42318', text: '#fff' }
       : tone === 'success'
         ? { bg: '#ecfdf3', border: '#bbf7d0', text: '#15803d' }
-        : { bg: '#eef4fb', border: '#d7e5f6', text: '#18416c' };
+        : tone === 'warning'
+          ? { bg: '#fff7ed', border: '#fed7aa', text: '#9a3412' }
+          : { bg: '#eff6ff', border: '#bfdbfe', text: '#1a6edb' };
 
   return (
     <Pressable
       onPress={onPress}
-      disabled={disabled || loading}
+      disabled={disabled || busy}
       style={({ pressed }) => [
-        styles.actionButton,
+        styles.miniBtn,
         { backgroundColor: palette.bg, borderColor: palette.border },
-        (disabled || loading) && styles.disabled,
-        pressed && !disabled && !loading && styles.pressed,
+        (disabled || busy) && styles.disabled,
+        pressed && !disabled && !busy && styles.pressed,
       ]}
     >
-      {loading ? (
-        <ActivityIndicator size="small" color={palette.text} />
-      ) : (
-        <>
-          <AppIcon name={icon} size={16} color={palette.text} />
-          <Text style={[styles.actionText, { color: palette.text }]}>{label}</Text>
-        </>
-      )}
+      {busy ? <ActivityIndicator size="small" color={palette.text} /> : <Text style={[styles.miniBtnText, { color: palette.text }]}>{label}</Text>}
     </Pressable>
   );
 };
 
-const FlagCard = ({ item, busy, onKeep, onClear, onDelete }) => {
-  const sc = statusColor(item.status);
-
-  return (
-    <View style={styles.card}>
-      <View style={styles.cardTop}>
-        <Text style={styles.cardTitle} numberOfLines={1}>{item.title || 'Untitled Report'}</Text>
-        <View style={[styles.statusBadge, { backgroundColor: sc.bg }]}>
-          <Text style={[styles.statusBadgeText, { color: sc.text }]}>{normalizeStatus(item.status).toUpperCase()}</Text>
-        </View>
-      </View>
-
-      <Text style={styles.metaLine} numberOfLines={2}>Reason: {item.flagReason || 'No reason provided'}</Text>
-      <Text style={styles.metaLine}>Reporter: {item?.reportedBy?.name || 'Unknown'}</Text>
-      <Text style={styles.metaLine}>Posted: {fmt(item.createdAt)}</Text>
-
-      <View style={styles.actionsRow}>
-        <ActionButton icon="flag-variant-outline" label="Keep" onPress={onKeep} disabled={busy} />
-        <ActionButton icon="check-circle-outline" label="Clear" tone="success" onPress={onClear} disabled={busy} />
-        <ActionButton icon="delete-outline" label="Delete" tone="danger" onPress={onDelete} loading={busy} disabled={busy} />
-      </View>
-    </View>
-  );
-};
-
-const PendingApprovalCard = ({ item, busy, onApprove, onReject }) => (
-  <View style={styles.card}>
-    <View style={styles.cardTop}>
-      <Text style={styles.cardTitle} numberOfLines={1}>{item.title || 'Untitled Report'}</Text>
-      <View style={[styles.statusBadge, { backgroundColor: '#fff7ed' }]}>
-        <Text style={[styles.statusBadgeText, { color: '#9a3412' }]}>PENDING</Text>
-      </View>
-    </View>
-
-    <Text style={styles.metaLine}>Reporter: {item?.reportedBy?.name || 'Unknown'}</Text>
-    <Text style={styles.metaLine}>Category: {item?.category || 'Unknown'}</Text>
-    <Text style={styles.metaLine}>Posted: {fmt(item.createdAt)}</Text>
-
-    <View style={styles.actionsRow}>
-      <ActionButton icon="check-circle-outline" label="Approve" tone="success" onPress={onApprove} disabled={busy} loading={busy} />
-      <ActionButton icon="close-circle-outline" label="Reject" tone="danger" onPress={onReject} disabled={busy} />
-    </View>
-  </View>
-);
-
 const AdminDashboardScreen = () => {
-  const { isAdmin } = useAuth();
+  const { isAdmin, logout } = useAuth();
   const {
-    getFlaggedReports,
-    getPendingApprovalReports,
+    items,
+    loadLatest,
     deleteReport,
-    reviewFlaggedReport,
     reviewItemApproval,
+    reviewClaim,
+    getPendingApprovalReports,
+    getPendingClaimReports,
     getAdminStats,
   } = useItems();
 
-  const [flagged, setFlagged] = useState([]);
+  const [activeTab, setActiveTab] = useState('posts');
+  const [users, setUsers] = useState([]);
   const [pendingApprovals, setPendingApprovals] = useState([]);
+  const [pendingClaims, setPendingClaims] = useState([]);
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [workingId, setWorkingId] = useState('');
-  const [approvalWorkingId, setApprovalWorkingId] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [keyword, setKeyword] = useState('');
-  const [lastUpdated, setLastUpdated] = useState('');
+  const [workingKey, setWorkingKey] = useState('');
 
   const loadDashboard = useCallback(async () => {
     setLoading(true);
     try {
-      const [flaggedResp, pendingResp, statsResp] = await Promise.all([
-        getFlaggedReports({ limit: 100 }),
-        getPendingApprovalReports({ limit: 100 }),
+      const [
+        _allPosts,
+        approvalsResp,
+        claimsResp,
+        usersResp,
+        statsResp,
+      ] = await Promise.all([
+        loadLatest({ limit: 200 }),
+        getPendingApprovalReports({ limit: 200 }),
+        getPendingClaimReports({ limit: 200 }),
+        authService.getAdminUsers({ limit: 200 }),
         getAdminStats(),
       ]);
-      setFlagged(flaggedResp?.items || []);
-      setPendingApprovals(pendingResp?.items || []);
+
+      setPendingApprovals(Array.isArray(approvalsResp?.items) ? approvalsResp.items : []);
+      setPendingClaims(Array.isArray(claimsResp?.items) ? claimsResp.items : []);
+      setUsers(Array.isArray(usersResp?.users) ? usersResp.users : []);
       setStats(statsResp?.stats || null);
-      setLastUpdated(new Date().toLocaleTimeString());
     } catch (error) {
-      Alert.alert('Error', error?.response?.data?.message || 'Could not load dashboard.');
+      Alert.alert('Error', error?.response?.data?.message || 'Could not load admin dashboard.');
     } finally {
       setLoading(false);
     }
-  }, [getAdminStats, getFlaggedReports, getPendingApprovalReports]);
+  }, [getAdminStats, getPendingApprovalReports, getPendingClaimReports, loadLatest]);
 
   useEffect(() => {
     loadDashboard();
   }, [loadDashboard]);
 
-  const totals = useMemo(() => ({
-    reports: stats?.totalReports || 0,
-    flagged: stats?.flaggedReports || 0,
-    users: stats?.totalUsers || 0,
-    recovered: stats?.recoveredReports || 0,
-    lost: stats?.lostReports || 0,
-    found: stats?.foundReports || 0,
-    pendingApprovals: stats?.pendingApprovals || pendingApprovals.length,
-  }), [pendingApprovals.length, stats]);
+  const allPosts = useMemo(() => (Array.isArray(items) ? items : []), [items]);
 
-  const visibleFlagged = useMemo(() => {
-    const q = keyword.trim().toLowerCase();
+  const refreshAfterAction = async () => {
+    await loadDashboard();
+  };
 
-    return (flagged || []).filter((entry) => {
-      const normalizedStatus = normalizeStatus(entry?.status);
-      const statusMatches = statusFilter === 'all' || normalizedStatus === statusFilter;
-      if (!statusMatches) {
-        return false;
-      }
-
-      if (!q) {
-        return true;
-      }
-
-      const haystack = `${entry?.title || ''} ${entry?.flagReason || ''} ${entry?.reportedBy?.name || ''}`.toLowerCase();
-      return haystack.includes(q);
-    });
-  }, [flagged, keyword, statusFilter]);
-
-  const onDelete = (id) => {
-    Alert.alert('Delete Report', 'This will permanently remove this report.', [
+  const confirmDeletePost = (post) => {
+    Alert.alert('Delete Post', `Delete "${post?.title || 'this post'}"?`, [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete',
         style: 'destructive',
         onPress: async () => {
-          setWorkingId(id);
+          const key = `delete-${post?._id}`;
+          setWorkingKey(key);
           try {
-            await deleteReport(id);
-            await loadDashboard();
+            await deleteReport(post?._id);
+            await refreshAfterAction();
           } catch (error) {
-            Alert.alert('Error', error?.response?.data?.message || 'Delete failed.');
+            Alert.alert('Error', error?.response?.data?.message || 'Could not delete post.');
           } finally {
-            setWorkingId('');
+            setWorkingKey('');
           }
         },
       },
     ]);
   };
 
-  const onReview = (id, action) => {
+  const confirmApproval = (item, action) => {
     Alert.alert(
-      action === 'clear' ? 'Clear Flag' : 'Keep Flag',
-      action === 'clear' ? 'Remove moderation flag from this report?' : 'Keep this report flagged for moderation?',
+      action === 'approve' ? 'Approve Post' : 'Reject Post',
+      `Are you sure you want to ${action} this post?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Confirm',
           onPress: async () => {
-            setWorkingId(id);
+            const key = `approval-${item?._id}-${action}`;
+            setWorkingKey(key);
             try {
-              await reviewFlaggedReport(id, action, action === 'clear' ? 'False alarm' : 'Kept flagged');
-              await loadDashboard();
+              await reviewItemApproval(item?._id, action, action === 'approve' ? 'Approved by admin.' : 'Rejected by admin.');
+              await refreshAfterAction();
             } catch (error) {
-              Alert.alert('Failed', error?.response?.data?.message || 'Could not review this report.');
+              Alert.alert('Error', error?.response?.data?.message || 'Could not update approval.');
             } finally {
-              setWorkingId('');
+              setWorkingKey('');
             }
           },
         },
@@ -251,25 +190,50 @@ const AdminDashboardScreen = () => {
     );
   };
 
-  const onApprovalReview = (id, action) => {
+  const confirmClaimReview = (item, action) => {
     Alert.alert(
-      action === 'approve' ? 'Approve Report' : 'Reject Report',
-      action === 'approve'
-        ? 'Make this report visible for users and homepage?'
-        : 'Reject this report and keep it hidden from users?',
+      action === 'approve' ? 'Approve Claim' : 'Decline Claim',
+      `Are you sure you want to ${action} this claim?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Confirm',
           onPress: async () => {
-            setApprovalWorkingId(id);
+            const key = `claim-${item?._id}-${action}`;
+            setWorkingKey(key);
             try {
-              await reviewItemApproval(id, action, action === 'approve' ? 'Approved by admin dashboard.' : 'Rejected by admin dashboard.');
-              await loadDashboard();
+              await reviewClaim(item?._id, { action, note: action === 'approve' ? 'Approved by admin.' : 'Declined by admin.' });
+              await refreshAfterAction();
             } catch (error) {
-              Alert.alert('Failed', error?.response?.data?.message || 'Could not update report approval.');
+              Alert.alert('Error', error?.response?.data?.message || 'Could not review claim.');
             } finally {
-              setApprovalWorkingId('');
+              setWorkingKey('');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const confirmSuspensionToggle = (targetUser) => {
+    const willSuspend = !targetUser?.isSuspended;
+    Alert.alert(
+      willSuspend ? 'Suspend User' : 'Unsuspend User',
+      willSuspend ? 'This user will not be able to access the app.' : 'This user will regain app access.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Confirm',
+          onPress: async () => {
+            const key = `user-${targetUser?._id}-${willSuspend ? 'suspend' : 'unsuspend'}`;
+            setWorkingKey(key);
+            try {
+              await authService.setUserSuspension(targetUser?._id, willSuspend, willSuspend ? 'Suspended by admin.' : '');
+              await refreshAfterAction();
+            } catch (error) {
+              Alert.alert('Error', error?.response?.data?.message || 'Could not update user status.');
+            } finally {
+              setWorkingKey('');
             }
           },
         },
@@ -285,280 +249,320 @@ const AdminDashboardScreen = () => {
     );
   }
 
-  const listHeader = (
-    <View>
-      <View style={styles.hero}>
-        <View style={styles.heroRow}>
-          <View>
-            <Text style={styles.heroTitle}>Admin Dashboard</Text>
-            <Text style={styles.heroSubtitle}>Simple moderation queue</Text>
-          </View>
-          <Pressable style={styles.refreshBtn} onPress={loadDashboard}>
-            <AppIcon name="refresh" size={18} color="#fff" />
-          </Pressable>
-        </View>
-        <Text style={styles.lastUpdated}>Updated: {lastUpdated || 'Now'}</Text>
-
-        <View style={styles.summaryRow}>
-          <SummaryCard label="Flagged" value={totals.flagged} icon="flag-outline" color="#b42318" bg="#fff1f2" />
-          <SummaryCard label="Pending" value={totals.pendingApprovals} icon="clock-outline" color="#9a3412" bg="#fff7ed" />
-          <SummaryCard label="Reports" value={totals.reports} icon="file-document-multiple-outline" />
-          <SummaryCard label="Users" value={totals.users} icon="account-group-outline" color="#15803d" bg="#ecfdf3" />
-        </View>
-      </View>
-
-      <View style={styles.filterCard}>
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Search flagged items"
-          placeholderTextColor={C.muted}
-          value={keyword}
-          onChangeText={setKeyword}
-        />
-
-        <View style={styles.filterRow}>
-          {STATUS_FILTERS.map((entry) => {
-            const active = statusFilter === entry.key;
-            return (
-              <Pressable
-                key={entry.key}
-                style={[styles.filterChip, active && styles.filterChipActive]}
-                onPress={() => setStatusFilter(entry.key)}
-              >
-                <Text style={[styles.filterChipText, active && styles.filterChipTextActive]}>{entry.label}</Text>
-              </Pressable>
-            );
-          })}
-        </View>
-
-        <Pressable
-          style={styles.resetFilters}
-          onPress={() => {
-            setStatusFilter('all');
-            setKeyword('');
-          }}
-        >
-          <Text style={styles.resetText}>Reset Filters</Text>
-        </Pressable>
-      </View>
-
-      <View style={styles.sectionRow}>
-        <Text style={styles.sectionTitle}>Pending Approvals</Text>
-        <Text style={styles.sectionCount}>{pendingApprovals.length}</Text>
-      </View>
-    </View>
-  );
-
-  const pendingList = (
-    <FlatList
-      data={pendingApprovals}
-      keyExtractor={(item) => item._id}
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      contentContainerStyle={styles.pendingList}
-      renderItem={({ item }) => (
-        <View style={styles.pendingCardWrap}>
-          <PendingApprovalCard
-            item={item}
-            busy={approvalWorkingId === item._id}
-            onApprove={() => onApprovalReview(item._id, 'approve')}
-            onReject={() => onApprovalReview(item._id, 'reject')}
-          />
-        </View>
-      )}
-      ListEmptyComponent={
-        <View style={styles.pendingEmpty}>
-          <Text style={styles.pendingEmptyText}>No pending reports right now.</Text>
-        </View>
-      }
-    />
-  );
-
   return (
     <SafeAreaView style={styles.root}>
-      {pendingList}
-      <FlatList
-        data={visibleFlagged}
-        keyExtractor={(item) => item._id}
-        contentContainerStyle={styles.listContent}
-        ListHeaderComponent={(
-          <View>
-            {listHeader}
-            <View style={styles.sectionRow}>
-        <Text style={styles.sectionTitle}>Flagged Reports</Text>
-        <Text style={styles.sectionCount}>{visibleFlagged.length} / {totals.flagged}</Text>
+      <View style={styles.header}>
+        <View>
+          <Text style={styles.title}>Admin Panel</Text>
+          <Text style={styles.subtitle}>Posts, users, claims and analytics</Text>
+        </View>
+        <View style={styles.headerActions}>
+          <Pressable style={styles.iconBtn} onPress={loadDashboard}>
+            <AppIcon name="refresh" size={18} color="#fff" />
+          </Pressable>
+          <Pressable style={[styles.iconBtn, styles.logoutBtn]} onPress={logout}>
+            <AppIcon name="logout" size={18} color="#fff" />
+          </Pressable>
+        </View>
       </View>
+
+      <View style={styles.tabRow}>
+        {TABS.map((tab) => {
+          const active = activeTab === tab.key;
+          return (
+            <Pressable key={tab.key} style={[styles.tabBtn, active && styles.tabBtnActive]} onPress={() => setActiveTab(tab.key)}>
+              <Text style={[styles.tabText, active && styles.tabTextActive]}>{tab.label}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+
+      <ScrollView
+        contentContainerStyle={styles.content}
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={loadDashboard} tintColor={C.blue} />}
+      >
+        {activeTab === 'posts' && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>All Posts ({allPosts.length})</Text>
+            {allPosts.length === 0 ? (
+              <EmptyState iconName="clipboard-text-outline" title="No Posts" message="No posts found." />
+            ) : (
+              allPosts.map((post) => {
+                const sc = statusStyle(post?.status);
+                const ac = approvalStyle(post?.approvalStatus);
+                const deleteKey = `delete-${post?._id}`;
+                return (
+                  <View key={post?._id} style={styles.card}>
+                    <View style={styles.cardTop}>
+                      <Text style={styles.cardTitle} numberOfLines={1}>{post?.title || 'Untitled Post'}</Text>
+                      <View style={styles.badgesRow}>
+                        <View style={[styles.badge, { backgroundColor: sc.bg }]}>
+                          <Text style={[styles.badgeText, { color: sc.text }]}>{normalizeStatus(post?.status).toUpperCase()}</Text>
+                        </View>
+                        <View style={[styles.badge, { backgroundColor: ac.bg }]}>
+                          <Text style={[styles.badgeText, { color: ac.text }]}>{String(post?.approvalStatus || 'pending').toUpperCase()}</Text>
+                        </View>
+                      </View>
+                    </View>
+                    <Text style={styles.meta}>By: {post?.reportedBy?.name || 'Unknown'} • {fmt(post?.createdAt)}</Text>
+                    <View style={styles.actionsRow}>
+                      <MiniButton
+                        label="Delete"
+                        tone="danger"
+                        onPress={() => confirmDeletePost(post)}
+                        busy={workingKey === deleteKey}
+                      />
+                    </View>
+                  </View>
+                );
+              })
+            )}
           </View>
         )}
-        refreshControl={<RefreshControl refreshing={loading} onRefresh={loadDashboard} tintColor={C.blue} />}
-        ListEmptyComponent={
-          loading ? (
-            <View style={styles.loaderWrap}>
-              <ActivityIndicator size="large" color={C.blue} />
-            </View>
-          ) : keyword || statusFilter !== 'all' ? (
-            <EmptyState iconName="magnify" title="No Match" message="Try different filter values." />
-          ) : (
-            <EmptyState iconName="shield-check-outline" title="All Clean" message="No flagged reports right now." />
-          )
-        }
-        renderItem={({ item }) => (
-          <FlagCard
-            item={item}
-            busy={workingId === item._id}
-            onKeep={() => onReview(item._id, 'keep')}
-            onClear={() => onReview(item._id, 'clear')}
-            onDelete={() => onDelete(item._id)}
-          />
+
+        {activeTab === 'approvals' && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Pending Post Approvals ({pendingApprovals.length})</Text>
+            {pendingApprovals.length === 0 ? (
+              <EmptyState iconName="check-circle-outline" title="No Pending Approvals" message="All posts are reviewed." />
+            ) : (
+              pendingApprovals.map((post) => {
+                const approveKey = `approval-${post?._id}-approve`;
+                const rejectKey = `approval-${post?._id}-reject`;
+                return (
+                  <View key={post?._id} style={styles.card}>
+                    <Text style={styles.cardTitle}>{post?.title || 'Untitled Post'}</Text>
+                    <Text style={styles.meta}>By: {post?.reportedBy?.name || 'Unknown'} • {fmt(post?.createdAt)}</Text>
+                    <View style={styles.actionsRow}>
+                      <MiniButton
+                        label="Approve"
+                        tone="success"
+                        onPress={() => confirmApproval(post, 'approve')}
+                        busy={workingKey === approveKey}
+                        disabled={workingKey === rejectKey}
+                      />
+                      <MiniButton
+                        label="Reject"
+                        tone="warning"
+                        onPress={() => confirmApproval(post, 'reject')}
+                        busy={workingKey === rejectKey}
+                        disabled={workingKey === approveKey}
+                      />
+                    </View>
+                  </View>
+                );
+              })
+            )}
+          </View>
         )}
-      />
+
+        {activeTab === 'claims' && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Disputed / Pending Claims ({pendingClaims.length})</Text>
+            {pendingClaims.length === 0 ? (
+              <EmptyState iconName="shield-check-outline" title="No Pending Claims" message="No claim disputes to resolve." />
+            ) : (
+              pendingClaims.map((entry) => {
+                const approveKey = `claim-${entry?._id}-approve`;
+                const declineKey = `claim-${entry?._id}-decline`;
+                return (
+                  <View key={entry?._id} style={styles.card}>
+                    <Text style={styles.cardTitle}>{entry?.title || 'Untitled Post'}</Text>
+                    <Text style={styles.meta}>Finder: {entry?.reportedBy?.name || 'Unknown'}</Text>
+                    <Text style={styles.meta}>Requester: {entry?.claim?.requester?.name || 'Unknown'}</Text>
+                    <Text style={styles.meta}>Claim Note: {entry?.claim?.note || 'No note'}</Text>
+                    <View style={styles.actionsRow}>
+                      <MiniButton
+                        label="Approve Claim"
+                        tone="success"
+                        onPress={() => confirmClaimReview(entry, 'approve')}
+                        busy={workingKey === approveKey}
+                        disabled={workingKey === declineKey}
+                      />
+                      <MiniButton
+                        label="Decline Claim"
+                        tone="warning"
+                        onPress={() => confirmClaimReview(entry, 'decline')}
+                        busy={workingKey === declineKey}
+                        disabled={workingKey === approveKey}
+                      />
+                    </View>
+                  </View>
+                );
+              })
+            )}
+          </View>
+        )}
+
+        {activeTab === 'users' && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>All Users ({users.length})</Text>
+            {users.length === 0 ? (
+              <EmptyState iconName="account-group-outline" title="No Users" message="No users found." />
+            ) : (
+              users.map((entry) => {
+                const key = `user-${entry?._id}-${entry?.isSuspended ? 'unsuspend' : 'suspend'}`;
+                return (
+                  <View key={entry?._id} style={styles.card}>
+                    <Text style={styles.cardTitle}>{entry?.name || 'Unknown User'}</Text>
+                    <Text style={styles.meta}>{entry?.email || 'No email'}</Text>
+                    <Text style={styles.meta}>Role: {entry?.role || 'user'}</Text>
+                    <Text style={styles.meta}>Status: {entry?.isSuspended ? 'SUSPENDED' : 'ACTIVE'}</Text>
+                    <View style={styles.actionsRow}>
+                      <MiniButton
+                        label={entry?.isSuspended ? 'Unsuspend' : 'Suspend'}
+                        tone={entry?.isSuspended ? 'success' : 'danger'}
+                        onPress={() => confirmSuspensionToggle(entry)}
+                        busy={workingKey === key}
+                      />
+                    </View>
+                  </View>
+                );
+              })
+            )}
+          </View>
+        )}
+
+        {activeTab === 'analytics' && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Analytics</Text>
+            {!stats ? (
+              <ActivityIndicator size="small" color={C.blue} />
+            ) : (
+              <>
+                <View style={styles.statsGrid}>
+                  <View style={styles.statCard}>
+                    <Text style={styles.statValue}>{stats?.totalReports || 0}</Text>
+                    <Text style={styles.statLabel}>Total Posts</Text>
+                  </View>
+                  <View style={styles.statCard}>
+                    <Text style={styles.statValue}>{stats?.recoveredReports || 0}</Text>
+                    <Text style={styles.statLabel}>Recovered Items</Text>
+                  </View>
+                  <View style={styles.statCard}>
+                    <Text style={styles.statValue}>{stats?.pendingApprovals || 0}</Text>
+                    <Text style={styles.statLabel}>Pending Approvals</Text>
+                  </View>
+                  <View style={styles.statCard}>
+                    <Text style={styles.statValue}>{stats?.pendingClaims || 0}</Text>
+                    <Text style={styles.statLabel}>Pending Claims</Text>
+                  </View>
+                </View>
+
+                <View style={styles.card}>
+                  <Text style={styles.cardTitle}>Most Lost Category</Text>
+                  <Text style={styles.meta}>{stats?.mostLostCategory || 'N/A'} ({stats?.mostLostCategoryCount || 0})</Text>
+                </View>
+              </>
+            )}
+          </View>
+        )}
+      </ScrollView>
     </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: C.bg },
-  pendingList: {
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  pendingCardWrap: {
-    width: 320,
-    marginRight: 10,
-  },
-  pendingEmpty: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  pendingEmptyText: {
-    color: C.muted,
-    fontWeight: '600',
-  },
-
-  hero: {
+  header: {
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     backgroundColor: C.blue,
-    padding: 16,
-    borderBottomLeftRadius: 22,
-    borderBottomRightRadius: 22,
-    marginBottom: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
-  heroRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-  heroTitle: { color: '#fff', fontSize: 22, fontWeight: '800' },
-  heroSubtitle: { color: 'rgba(255,255,255,0.85)', fontSize: 13, marginTop: 4 },
-  lastUpdated: { color: 'rgba(255,255,255,0.8)', marginTop: 8, fontSize: 12 },
-  refreshBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.25)',
+  title: { color: '#fff', fontSize: 22, fontWeight: '800' },
+  subtitle: { color: 'rgba(255,255,255,0.88)', marginTop: 2, fontSize: 12 },
+  headerActions: { flexDirection: 'row', gap: 8 },
+  iconBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.22)',
   },
+  logoutBtn: { backgroundColor: 'rgba(180,35,24,0.45)' },
 
-  summaryRow: { marginTop: 14, flexDirection: 'row', gap: 9 },
-  summaryCard: {
-    flex: 1,
-    borderRadius: 14,
-    paddingVertical: 12,
-    alignItems: 'center',
-    gap: 4,
-  },
-  summaryValue: { fontSize: 22, fontWeight: '800' },
-  summaryLabel: { fontSize: 11, fontWeight: '700' },
-
-  filterCard: {
+  tabRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     backgroundColor: '#fff',
-    marginHorizontal: 14,
-    marginBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: C.border,
+  },
+  tabBtn: {
+    borderWidth: 1,
+    borderColor: '#c7d2fe',
+    backgroundColor: '#eef2ff',
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  tabBtnActive: { backgroundColor: C.blue, borderColor: C.blue },
+  tabText: { color: '#1e3a8a', fontWeight: '700', fontSize: 12 },
+  tabTextActive: { color: '#fff' },
+
+  content: { padding: 12, paddingBottom: 24 },
+  section: { gap: 10 },
+  sectionTitle: { fontSize: 18, fontWeight: '800', color: C.text },
+
+  card: {
+    backgroundColor: C.card,
     borderWidth: 1,
     borderColor: C.border,
     borderRadius: 14,
     padding: 12,
-    gap: 10,
   },
-  searchInput: {
-    borderWidth: 1,
-    borderColor: C.border,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 9,
-    color: C.text,
-    fontSize: 14,
-    backgroundColor: '#f9fafb',
-  },
-  filterRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  filterChip: {
-    paddingHorizontal: 11,
-    paddingVertical: 7,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: '#cfd8e3',
-    backgroundColor: '#fff',
-  },
-  filterChipActive: {
-    backgroundColor: C.blue,
-    borderColor: C.blue,
-  },
-  filterChipText: {
-    color: '#355367',
-    fontWeight: '700',
-    fontSize: 12,
-  },
-  filterChipTextActive: {
-    color: '#fff',
-  },
-  resetFilters: {
-    alignSelf: 'flex-start',
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-    borderRadius: 8,
-    backgroundColor: '#eef4fb',
-  },
-  resetText: { color: '#18416c', fontWeight: '700', fontSize: 12 },
-
-  sectionRow: {
+  cardTop: {
     flexDirection: 'row',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    marginBottom: 12,
+    marginBottom: 6,
+    gap: 8,
   },
-  sectionTitle: { fontSize: 17, fontWeight: '800', color: C.text },
-  sectionCount: { color: C.red, fontWeight: '800' },
+  cardTitle: { flex: 1, color: C.text, fontSize: 15, fontWeight: '700' },
+  meta: { color: C.muted, fontSize: 12, marginTop: 2 },
 
-  listContent: { paddingHorizontal: 14, paddingBottom: 30 },
+  badgesRow: { flexDirection: 'row', gap: 6, alignItems: 'center', flexWrap: 'wrap' },
+  badge: { borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },
+  badgeText: { fontSize: 10, fontWeight: '800' },
 
-  card: {
-    backgroundColor: C.card,
-    borderRadius: 16,
-    padding: 14,
-    marginBottom: 12,
+  actionsRow: { flexDirection: 'row', gap: 8, marginTop: 10 },
+  miniBtn: {
+    minHeight: 36,
+    minWidth: 100,
+    borderRadius: 10,
     borderWidth: 1,
-    borderColor: C.border,
-  },
-  cardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 },
-  cardTitle: { flex: 1, fontSize: 15, fontWeight: '700', color: C.text, marginRight: 8 },
-  statusBadge: { borderRadius: 999, paddingHorizontal: 10, paddingVertical: 3 },
-  statusBadgeText: { fontSize: 10, fontWeight: '800' },
-
-  metaLine: { fontSize: 12, color: C.muted, marginBottom: 6 },
-
-  actionsRow: { flexDirection: 'row', gap: 8, marginTop: 6 },
-  actionButton: {
-    flex: 1,
-    height: 42,
-    borderWidth: 1,
-    borderRadius: 11,
-    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
+    paddingHorizontal: 10,
   },
-  actionText: { fontSize: 13, fontWeight: '700' },
-  disabled: { opacity: 0.5 },
-  pressed: { opacity: 0.84 },
+  miniBtnText: { fontWeight: '700', fontSize: 12 },
 
-  loaderWrap: { paddingVertical: 40, alignItems: 'center' },
+  statsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  statCard: {
+    width: '48.8%',
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  statValue: { fontSize: 22, fontWeight: '800', color: C.blue },
+  statLabel: { marginTop: 2, fontSize: 12, fontWeight: '600', color: C.muted },
+
+  disabled: { opacity: 0.55 },
+  pressed: { opacity: 0.85 },
 });
 
 export default AdminDashboardScreen;

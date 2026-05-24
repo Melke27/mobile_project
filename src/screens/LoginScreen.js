@@ -79,7 +79,7 @@ const LoginScreen = ({ navigation }) => {
                   <AppIcon name="map-search" size={48} color="#ffffff" />
                 </View>
               </View>
-              <Text style={styles.appTitle}>FindIt</Text>
+              <Text style={styles.appTitle}>Findit</Text>
               <Text style={styles.appSubtitle}>Campus Lost & Found</Text>
               <Text style={styles.tagline}>Sign in to connect and recover items</Text>
             </View>

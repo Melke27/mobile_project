@@ -30,7 +30,7 @@ const DEV_API_BASE_URL_CANDIDATES = resolveDevCandidates();
 let activeDevApiBaseUrl = DEV_API_BASE_URL_CANDIDATES[0] || HOSTED_API_BASE_URL;
 
 export const API_BASE_URL = __DEV__ ? activeDevApiBaseUrl : HOSTED_API_BASE_URL;
-export const DEFAULT_CAMPUS = 'LAFMS';
+export const DEFAULT_CAMPUS = 'Findit';
 
 export const getDevApiBaseUrlCandidates = () => DEV_API_BASE_URL_CANDIDATES;
 

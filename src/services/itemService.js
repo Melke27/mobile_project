@@ -57,6 +57,31 @@ export const itemService = {
     }
   },
 
+  async getPendingClaimReports(params = {}) {
+    try {
+      const { data } = await apiClient.get('/items/claims/pending', { params });
+      return data;
+    } catch (error) {
+      if (error?.response?.status !== 404) {
+        throw error;
+      }
+
+      // Backward-compatible fallback for older backend deployments.
+      const { data } = await apiClient.get('/items', { params });
+      const items = Array.isArray(data?.items) ? data.items : [];
+      const pendingItems = items.filter((item) => String(item?.claim?.status || '').toLowerCase() === 'pending');
+      return {
+        items: pendingItems,
+        pagination: data?.pagination || {
+          page: 1,
+          limit: pendingItems.length,
+          total: pendingItems.length,
+          totalPages: 1,
+        },
+      };
+    }
+  },
+
   async getAdminStats() {
     const { data } = await apiClient.get('/items/admin/stats');
     return data;

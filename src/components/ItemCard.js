@@ -17,7 +17,7 @@ const C = {
 const STATUS_MAP = {
   lost: { label: 'LOST', color: C.lost.text, bg: C.lost.bg },
   found: { label: 'FOUND', color: C.found.text, bg: C.found.bg },
-  recovered: { label: 'RECOVERED', color: C.blue, bg: '#eff6ff' },
+  recovered: { label: 'RETURNED', color: C.blue, bg: '#eff6ff' },
   returned: { label: 'RETURNED', color: C.blue, bg: '#eff6ff' },
 };
 

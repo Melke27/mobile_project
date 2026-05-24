@@ -77,6 +77,13 @@ const buildListQuery = (query) => {
     }
   }
 
+  if (query.location) {
+    const safeLocation = escapeRegExp(trimString(query.location));
+    if (safeLocation) {
+      filter.locationText = new RegExp(safeLocation, 'i');
+    }
+  }
+
   if (query.dateFrom || query.dateTo) {
     const createdAt = {};
 
@@ -726,6 +733,49 @@ const getPendingApprovalItems = async (req, res, next) => {
   }
 };
 
+const getPendingClaimItems = async (req, res, next) => {
+  try {
+    const page = Math.max(Number(req.query.page) || 1, 1);
+    const limit = Math.min(Math.max(Number(req.query.limit) || 30, 1), 100);
+    const keyword = trimString(req.query.keyword);
+    const filter = { 'claim.status': 'pending' };
+
+    if (keyword) {
+      const safeKeyword = escapeRegExp(keyword);
+      const keywordRegex = new RegExp(safeKeyword, 'i');
+      filter.$or = [
+        { title: keywordRegex },
+        { description: keywordRegex },
+        { category: keywordRegex },
+        { campus: keywordRegex },
+        { locationText: keywordRegex },
+      ];
+    }
+
+    const [items, total] = await Promise.all([
+      Item.find(filter)
+        .populate('reportedBy', '_id name email campus role')
+        .populate('claim.requester', '_id name email campus role')
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit),
+      Item.countDocuments(filter),
+    ]);
+
+    return res.json({
+      items,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.max(Math.ceil(total / limit), 1),
+      },
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
 const reviewFlaggedItem = async (req, res, next) => {
   try {
     const { id } = req.params;
@@ -950,6 +1000,7 @@ module.exports = {
   flagItem,
   getFlaggedItems,
   getPendingApprovalItems,
+  getPendingClaimItems,
   reviewFlaggedItem,
   reviewItemApproval,
   deleteItem,

@@ -2,7 +2,7 @@
   "name": "campus-lost-found-mobile",
   "version": "1.0.0",
   "private": true,
-  "description": "LAFMS mobile application (React Native client)",
+  "description": "Findit mobile application (React Native client)",
   "scripts": {
     "start": "react-native start",
     "start:reset": "react-native start --reset-cache",
